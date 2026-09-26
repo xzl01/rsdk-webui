@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "id": "gh-e25-06",
+  "meta": {
+    "name": "E25 (GH, 修复后)",
+    "notes": ""
+  },
+  "target": {
+    "product": "radxa-e25",
+    "suite": "bookworm",
+    "edition": "cli",
+    "sectorSize": 512,
+    "imageName": "output.img",
+    "productOverride": ""
+  },
+  "repos": {
+    "radxaMirror": "",
+    "distroMirror": "",
+    "testRepo": false,
+    "usePkgsJson": true,
+    "snapshot": "",
+    "extra": []
+  },
+  "packages": {
+    "vendor": true,
+    "kernelOverride": "",
+    "firmwareOverride": "",
+    "install": [
+      "nano",
+      "htop",
+      "htop"
+    ],
+    "purge": [],
+    "installRecommends": false,
+    "localDebsDir": "",
+    "noCache": false
+  },
+  "system": {
+    "hostname": "e25-lab",
+    "timezone": "Asia/Shanghai",
+    "locale": "zh_CN.UTF-8",
+    "keyboard": {
+      "model": "pc105",
+      "layout": "us",
+      "variant": "",
+      "options": ""
+    },
+    "user": {
+      "name": "radxa",
+      "passwordHash": "",
+      "sudo": true,
+      "nopasswd": true,
+      "shell": "/bin/bash",
+      "sshKeys": [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexample webui@test"
+      ]
+    },
+    "ssh": {
+      "enabled": true,
+      "passwordAuth": false,
+      "permitRootLogin": "prohibit-password",
+      "rootAuthorizedKeys": []
+    },
+    "wifi": null,
+    "enableServices": [
+      "avahi-daemon.service"
+    ]
+  },
+  "files": [
+    {
+      "id": "f1",
+      "path": "/etc/motd",
+      "mode": "0644",
+      "owner": "root:root",
+      "content": "rsdk-webui 定制镜像\n",
+      "encoding": "utf8",
+      "blob": "",
+      "enabled": true
+    }
+  ],
+  "hooks": {
+    "pre": []
+  },
+  "backend": {
+    "kind": "gh-actions",
+    "repo": "xzl01/rsdk-webui",
+    "branchPrefix": "build",
+    "publishRelease": false,
+    "compress": true,
+    "keepBranch": true
+  }
+}
