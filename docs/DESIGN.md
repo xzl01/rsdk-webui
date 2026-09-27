@@ -296,6 +296,10 @@ code:
   the allowlist exists purely to refuse everyone else; browsers send `Origin` on
   same-origin non-GET requests too, which is why the server's own origin has to
   be allowed explicitly.
+* **The board audit must not depend on the server having run.** `ops/check-boards.py`
+  takes `--tree` when the caller already has one (the Pages workflow extracts it
+  alongside the other static assets) and otherwise extracts it from the container
+  image itself.
 * **Generated values that reach a shell are validated, not escaped only.**
   `mode`, `owner`, `locale`, `hostname` and package names go through the zod
   schema in `shared/`, so the browser and the server reject the same input with

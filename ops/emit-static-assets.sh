@@ -157,7 +157,7 @@ fi
 # combination that upstream cannot actually build - instead of letting the user
 # discover it 30 minutes into a build.
 log "体检每个 (board, suite, edition) 组合"
-python3 "$ROOT/ops/check-boards.py" --verdicts "$OUT/boards.json" --quiet >/dev/null || \
+python3 "$ROOT/ops/check-boards.py" --tree "$work" --verdicts "$OUT/boards.json" --quiet >/dev/null || \
   log "  体检未全部通过（boards.json 里会标出来）"
 
 log "done"

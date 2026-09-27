@@ -102,6 +102,7 @@ def required_essential(product: dict, boot: str, suite: str) -> list[str]:
 
 
 def find_build_tree() -> pathlib.Path | None:
+    """a directory holding build/ and configs/, as the server caches them"""
     trees = CACHE / "rsdk-trees"
     if not trees.exists():
         return None
@@ -109,6 +110,65 @@ def find_build_tree() -> pathlib.Path | None:
         if (entry / "build" / "rootfs.jsonnet").exists():
             return entry
     return None
+
+
+def engine_args() -> list[str]:
+    """
+    Same discovery the server does: podman's default store is unusable when its
+    graph root sits on btrfs, so fall back to a dedicated one.
+    """
+    engine = os.environ.get("RSDK_WEBUI_ENGINE", "podman")
+    if engine != "podman":
+        return []
+    try:
+        subprocess.run(["podman", "info"], capture_output=True, timeout=20, check=True)
+        return []
+    except Exception:
+        pass
+
+    root, runroot = CACHE / "podman-root", CACHE / "podman-run"
+    root.mkdir(parents=True, exist_ok=True)
+    runroot.mkdir(parents=True, exist_ok=True)
+    try:
+        fs = subprocess.run(
+            ["stat", "-f", "-c", "%T", str(CACHE)], capture_output=True, text=True
+        ).stdout.strip()
+    except Exception:
+        fs = ""
+    driver = fs if fs in ("btrfs", "zfs") else "overlay"
+    candidate = ["--root", str(root), "--runroot", str(runroot), "--storage-driver", driver]
+    try:
+        subprocess.run(["podman", *candidate, "info"], capture_output=True, timeout=30, check=True)
+        return candidate
+    except Exception:
+        return ["--root", str(root), "--runroot", str(runroot), "--storage-driver", "vfs"]
+
+
+def extract_build_tree(dest: pathlib.Path) -> pathlib.Path:
+    """pull build/ and configs/ out of the image, exactly like the server does"""
+    engine = os.environ.get("RSDK_WEBUI_ENGINE", "podman")
+    image = os.environ.get("RSDK_WEBUI_IMAGE", "rsdk-image:latest")
+    probe = subprocess.run(
+        [engine, *engine_args(), "image", "exists", image], capture_output=True
+    )
+    if probe.returncode != 0:
+        sys.exit(f"{image} 未导入，先跑 ./ops/setup.sh")
+    print(f"从 {image} 导出 rsdk jsonnet 树…")
+    tar = dest / "build.tar"
+    cmd = [
+        engine, *engine_args(), "run", "--rm", "--entrypoint", "tar", image,
+        "-cf", "-", "-C", "/usr/share/rsdk", "build", "configs",
+    ]
+    with open(tar, "wb") as handle:
+        done = subprocess.run(cmd, stdout=handle, stderr=subprocess.PIPE, timeout=900)
+    if done.returncode != 0:
+        sys.exit(f"导出失败: {done.stderr.decode()[-400:]}")
+    subprocess.run(["tar", "-xf", str(tar), "-C", str(dest)], check=True)
+    tar.unlink(missing_ok=True)
+    tree = dest / "build" / "rootfs.jsonnet"
+    if not tree.exists():
+        sys.exit("导出后仍找不到 build/rootfs.jsonnet")
+    return dest
 
 
 RENDER_SCRIPT = r"""
@@ -129,26 +189,24 @@ done
 """
 
 
-def render_package_lists(combos: list[tuple[str, str, str]]) -> dict[tuple[str, str, str], object]:
-    tree = find_build_tree()
+def render_package_lists(
+    combos: list[tuple[str, str, str]],
+    tree: pathlib.Path | None = None,
+) -> dict[tuple[str, str, str], object]:
     if tree is None:
-        sys.exit("rsdk tree not found - run ./ops/setup.sh first")
+        tree = find_build_tree()
+    if tree is None:
+        # standalone use: pull the tree straight out of the image so this script
+        # does not depend on the server having run first
+        scratch = pathlib.Path("/tmp") / f"rsdk-tree-{os.getpid()}"
+        scratch.mkdir(parents=True, exist_ok=True)
+        tree = extract_build_tree(scratch)
 
     engine = os.environ.get("RSDK_WEBUI_ENGINE", "podman")
-    engine_args: list[str] = []
-    if engine == "podman" and (CACHE / "podman-root").exists():
-        try:
-            subprocess.run(["podman", "info"], capture_output=True, timeout=20, check=True)
-        except Exception:
-            engine_args = [
-                "--root", str(CACHE / "podman-root"),
-                "--runroot", str(CACHE / "podman-run"),
-                "--storage-driver", "btrfs",
-            ]
 
     payload = "\n".join("\t".join(combo) for combo in combos) + "\n"
     cmd = [
-        engine, *engine_args, "run", "--rm", "-i",
+        engine, *engine_args(), "run", "--rm", "-i",
         "-v", f"{tree}/build:/usr/share/rsdk/build:ro",
         "-v", f"{tree}/configs:/usr/share/rsdk/configs:ro",
         "--entrypoint", "bash", os.environ.get("RSDK_WEBUI_IMAGE", "rsdk-image:latest"),
@@ -194,6 +252,10 @@ def main() -> int:
         help="write a compact per-combination verdict for the UI (web/public/boards.json)",
     )
     parser.add_argument("--only", help="check a single product")
+    parser.add_argument(
+        "--tree",
+        help="目录，内含 build/ 与 configs/（默认用缓存里的，或从镜像里现抽）",
+    )
     parser.add_argument("--quiet", action="store_true", help="only print problems")
     args = parser.parse_args()
 
@@ -215,7 +277,7 @@ def main() -> int:
 
     print(f"检查 {len(products)} 个板子 / {len(combos)} 个 (suite, edition) 组合\n")
     print("渲染各 edition 的软件包列表（在容器里跑 jsonnet）…")
-    rendered = render_package_lists(combos)
+    rendered = render_package_lists(combos, pathlib.Path(args.tree) if args.tree else None)
     print(f"  拿到 {len(rendered)} 份列表\n")
 
     indexes: dict[str, dict[str, dict] | None] = {}
