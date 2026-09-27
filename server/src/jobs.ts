@@ -248,6 +248,11 @@ export async function cancelJob(id: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export async function startFetchImage(): Promise<Job> {
+  // the download is ~500 MB into a fixed directory, so two of them at once
+  // would just fight over the same files
+  const running = listJobs().find((j) => j.kind === 'fetch-image' && (j.status === 'running' || j.status === 'queued'))
+  if (running) return running
+
   const id = `setup-fetch-image`
   const dir = jobDir(id)
   fs.mkdirSync(dir, { recursive: true })

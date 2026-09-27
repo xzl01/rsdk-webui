@@ -7,14 +7,16 @@ export function Card({
   hint,
   actions,
   children,
+  className,
 }: {
   title?: React.ReactNode
   hint?: React.ReactNode
   actions?: React.ReactNode
   children: React.ReactNode
+  className?: string
 }) {
   return (
-    <section className="card">
+    <section className={`card${className ? ` ${className}` : ''}`}>
       {(title || actions) && (
         <header>
           {title && <h3>{title}</h3>}

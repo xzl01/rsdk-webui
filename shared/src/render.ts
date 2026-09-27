@@ -81,6 +81,15 @@ export function renderRsdkCommand(p: Profile): string {
  * package list or a mirror. The bundle records the key it was built with and
  * asks rsdk for `--no-cache` as soon as the key changes.
  */
+/**
+ * Bump this whenever the *shape* of what `customize/install.sh` does changes.
+ *
+ * `rsdk build` reuses an existing rootfs.tar wholesale, so a cache hit means the
+ * old hook never runs again. Without this the generated script could change and
+ * builds would keep producing images built by the previous version.
+ */
+export const GENERATOR_VERSION = 2
+
 export function rootfsCacheKey(p: Profile): string {
   const relevant = {
     target: {
@@ -94,8 +103,7 @@ export function rootfsCacheKey(p: Profile): string {
     system: p.system,
     files: p.files,
     hooks: p.hooks,
-    // bump when the generated install script changes shape
-    generator: 1,
+    generator: GENERATOR_VERSION,
   }
   return djb2(JSON.stringify(relevant))
 }

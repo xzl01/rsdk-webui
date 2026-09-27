@@ -5,9 +5,7 @@ import Fastify from 'fastify'
 import {
   newProfile,
   normalizeForProduct,
-  renderGhWorkflow,
   renderRsdkArgs,
-  renderTemplateReadme,
   bootloaderPrefix,
   requiredKernelPackages,
   safeParseProfile,
@@ -38,7 +36,7 @@ import {
   saveProfile,
   updateJob,
 } from './store.ts'
-import { buildIndex, indexKey, readIndexMeta, resolvePackages, searchPackages } from './packages.ts'
+import { buildIndex, indexKey, readIndexMeta, searchPackages } from './packages.ts'
 import { analyseLocalPackages, preflight } from './preflight.ts'
 import { downloadGhaArtifacts, repoStatus, setupRepo } from './backends/gha.ts'
 
@@ -164,14 +162,6 @@ export async function buildServer() {
     }
   })
 
-  app.get('/api/gh/workflow', async (request) => {
-    const repo = (request.query as { repo?: string }).repo ?? ''
-    return {
-      workflow: renderGhWorkflow(),
-      readme: renderTemplateReadme(...(repo.split('/') as [string, string])),
-    }
-  })
-
   // -------------------------------------------------------------------------
   // catalog
   // -------------------------------------------------------------------------
@@ -224,12 +214,6 @@ export async function buildServer() {
   app.delete('/api/profiles/:id', async (request) => {
     const { id } = request.params as { id: string }
     return { deleted: deleteProfile(id) }
-  })
-
-  app.post('/api/profiles/validate', async (request, reply) => {
-    const parsed = safeParseProfile(request.body)
-    if (!parsed.success) return reply.code(400).send({ ok: false, issues: parsed.error.issues })
-    return { ok: true }
   })
 
   // -------------------------------------------------------------------------
@@ -401,8 +385,13 @@ export async function buildServer() {
     const job = getJob(id)
     if (!job?.dir) return reply.code(404).send({ error: 'not found' })
     const rel = (request.params as Record<string, string>)['*']
-    const target = path.resolve(job.dir, rel)
-    if (!target.startsWith(path.resolve(job.dir))) return reply.code(400).send({ error: 'invalid path' })
+    const root = path.resolve(job.dir)
+    const target = path.resolve(root, rel)
+    // `startsWith` alone would let /a/bc through when the root is /a/b
+    const inside = path.relative(root, target)
+    if (inside.startsWith('..') || path.isAbsolute(inside)) {
+      return reply.code(400).send({ error: 'invalid path' })
+    }
     if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
       return reply.code(404).send({ error: 'not found' })
     }
@@ -456,14 +445,6 @@ export async function buildServer() {
     const p = product ? await findProduct(product).catch(() => undefined) : undefined
     const key = indexKey(suite, socList(p))
     return { key, ...searchPackages(key, q ?? '', Number(limit ?? 60)) }
-  })
-
-  app.post('/api/packages/resolve', async (request) => {
-    const { product, suite, names } = request.body as { product?: string; suite?: string; names?: string[] }
-    if (!suite || !names) return { found: [], missing: [] }
-    const p = product ? await findProduct(product).catch(() => undefined) : undefined
-    const key = indexKey(suite, socList(p))
-    return resolvePackages(key, names)
   })
 
   // -------------------------------------------------------------------------

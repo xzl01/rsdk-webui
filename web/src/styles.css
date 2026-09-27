@@ -825,6 +825,23 @@ pre.log .err {
   color: var(--danger);
 }
 
+.log-placeholder {
+  padding: 24px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.01);
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 12.5px;
+}
+
+.job-sidebar {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ---------------------------------------------------------------- tabs/tab */
 
 .tabs {
@@ -1232,6 +1249,15 @@ hr.sep {
   .grid-2,
   .wizard-layout.with-preview {
     grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .job-view .job-sidebar {
+    display: contents;
+  }
+  .job-view .job-progress {
+    order: -2;
+  }
+  .job-view .job-log {
+    order: -1;
   }
   .wizard-layout.with-preview > aside {
     margin-top: 18px;

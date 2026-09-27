@@ -125,7 +125,9 @@ export default function App() {
   const save = async () => {
     if (!profile) return
     try {
-      await api.saveProfile(profile)
+      // the backend may normalise (e.g. clamp suite/edition to what the board
+      // supports) - apply what it actually stored
+      setProfile(await api.saveProfile(profile))
       setSaved(await api.profiles())
       setToast('方案已保存')
       setTimeout(() => setToast(null), 2200)

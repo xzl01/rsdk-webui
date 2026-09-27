@@ -4,12 +4,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { ProfileSchema, type Profile } from './schema.ts'
+import { parseProfile, ProfileSchema, safeParseProfile, type Profile } from './schema.ts'
 import { parse as parseYaml } from 'yaml'
 import { exists, isSymlinkTo, mode, read, runInstallScript } from './install-harness.ts'
 import { runFetchImage } from './fetch-harness.ts'
 import { assembleBundle, isIgnoredBundlePath } from './assemble.ts'
 import {
+  GENERATOR_VERSION,
   patchRootfsJsonnet,
   rootfsCacheKey,
   renderBundle,
@@ -59,8 +60,8 @@ test('a custom hostname is written through the jsonnet value, not a hook', () =>
   // bdebstrap emits `--customize-hook=echo "<hostname>" > /etc/hostname` as the
   // very last customize hook, so only the jsonnet value can change it
   const stock = `function(p) p\n+ cleanup()\n+ { mmdebstrap+: { hostname: product, target: rootfs } }\n`
-  const patched = patchRootfsJsonnet(stock, makeProfile({ system: { hostname: 'my board' } }))
-  assert.ok(patched.includes('hostname: "my board",'))
+  const patched = patchRootfsJsonnet(stock, makeProfile({ system: { hostname: 'my-board' } }))
+  assert.ok(patched.includes('hostname: "my-board",'))
   assert.ok(!patched.includes('hostname: product,'))
   // untouched when the user did not ask for one
   assert.ok(patchRootfsJsonnet(stock, makeProfile()).includes('hostname: product,'))
@@ -256,6 +257,16 @@ test('generated inner.sh is valid bash and calls rsdk build', () => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
+})
+
+test('the cache key carries the generator version', () => {
+  // a cache hit skips the whole rootfs build, so a change to the generated hook
+  // must invalidate it - otherwise builds silently keep the old behaviour
+  const key = rootfsCacheKey(makeProfile())
+  const inner = renderBundle(makeProfile()).find((f) => f.path === 'inner.sh')!.content as string
+  assert.ok(inner.includes(`WANT_KEY=${key}`), 'inner.sh must use the same key the renderer computed')
+  assert.equal(inner.includes(`WANT_KEY=${key}`), true)
+  assert.ok(GENERATOR_VERSION >= 2, 'bump GENERATOR_VERSION when customize/install.sh changes shape')
 })
 
 test('rootfsCacheKey only reacts to rootfs-relevant changes', () => {
@@ -628,5 +639,44 @@ test('every checked-in workflow file is valid YAML', () => {
         assert.ok(step.uses || step.run, `${name}:${jobName} has a step that does nothing`)
       }
     }
+  }
+})
+
+test('the profile schema refuses values that would end up in generated shell', () => {
+  const base = {
+    id: 'x',
+    meta: { name: 'x' },
+    target: { product: 'radxa-e25', suite: 'bookworm', edition: 'cli' },
+    backend: { kind: 'local-docker' as const },
+  }
+  const withFile = (mode: string, owner = 'root:root', path = '/tmp/x') => ({
+    ...base,
+    files: [{ id: 'f', path, mode, owner, content: 'x' }],
+  })
+
+  // accepted: the values the UI actually produces
+  for (const profile of [
+    withFile('0644'),
+    withFile('755'),
+    withFile('0600', 'www-data:www-data'),
+    { ...base, packages: { install: ['nano', 'libtsm4/trixie-backports'] } },
+    { ...base, repos: { radxaMirror: 'https://mirrors.ustc.edu.cn/radxa-deb', snapshot: '20240101T000000Z' } },
+    { ...base, system: { hostname: 'rock-5b', locale: 'zh_CN.UTF-8', timezone: 'Asia/Shanghai' } },
+  ]) {
+    assert.ok(parseProfile(profile), `should accept ${JSON.stringify(profile).slice(0, 90)}`)
+  }
+
+  // refused: shell/sed/regex metacharacters, relative paths, wrong shapes
+  for (const [label, profile] of [
+    ['mode 注入', withFile('0644; echo pwned')],
+    ['owner 注入', withFile('0644', 'root; id')],
+    ['path 非绝对', withFile('0644', 'root:root', 'etc/hosts')],
+    ['locale 注入', { ...base, system: { locale: 'zh_CN.UTF-8)|.*' } }],
+    ['hostname 注入', { ...base, system: { hostname: 'a b;id' } }],
+    ['包名注入', { ...base, packages: { install: ['nano; id'] } }],
+    ['仓库 URL 非 http', { ...base, repos: { extra: [{ id: 'r', name: 'r', url: 'file:///etc', suite: 's', components: ['main'] }] } }],
+    ['快照格式', { ...base, repos: { snapshot: 'yesterday' } }],
+  ] as const) {
+    assert.equal(safeParseProfile(profile).success, false, `${label} should be refused`)
   }
 })

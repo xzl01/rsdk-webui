@@ -54,6 +54,7 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
     if (currentMode() === 'static') return
     let source: EventSource | null = null
     let stopped = false
+    let attempts = 0
 
     const connect = () => {
       source = new EventSource(`/api/jobs/${jobId}/stream?offset=${offsetRef.current}`)
@@ -72,9 +73,11 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
         source?.close()
         void api.job(jobId).then(setJob).catch(() => undefined)
       })
+      // a bounded number of reconnects: the job may have been pruned, in which
+      // case the SSE endpoint answers 404 forever
       source.onerror = () => {
         source?.close()
-        if (!stopped) setTimeout(connect, 2000)
+        if (!stopped && attempts++ < 5) setTimeout(connect, 2000)
       }
     }
 
@@ -100,8 +103,9 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
   const isStatic = currentMode() === 'static'
 
   return (
-    <div className="grid-2" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
+    <div className="grid-2 job-view" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
       <Card
+        className="job-log"
         title={job ? job.title : '加载中…'}
         actions={
           <>
@@ -136,11 +140,11 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
           )}
         </div>
         <div className="body" style={{ paddingTop: 10 }}>
-          {lines.length === 0 && running && isStatic && (
+          {!log && running && isStatic && (
             <div style={{ marginBottom: 12 }}>
               <Note tone="info">
                 GitHub 只在 run <b>结束之后</b>才提供日志，所以构建期间这里是空的。
-                进度看右侧的「进度」时间线（直接从 run 的步骤同步），或者
+                进度看「进度」时间线（直接从 run 的步骤同步），或者
                 {job?.ghRunUrl ? (
                   <>
                     {' '}
@@ -155,14 +159,16 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
               </Note>
             </div>
           )}
-          <pre className="code log" ref={preRef}>
-            {lines.join('\n') || (running ? '等待输出…' : '没有日志')}
-          </pre>
+          {log ? (
+            <pre className="code log" ref={preRef}>{lines.join('\n')}</pre>
+          ) : (
+            <div className="log-placeholder">{running ? '等待构建日志…' : '这次构建没有日志'}</div>
+          )}
         </div>
       </Card>
 
-      <div style={{ display: 'grid', gap: 16, alignContent: 'start', gridTemplateColumns: 'minmax(0,1fr)' }}>
-        <Card title="进度">
+      <div className="job-sidebar">
+        {job && (job.steps.length > 0 || running) && <Card title="进度" className="job-progress">
           <div className="body">
             {job && job.steps.length > 0 ? (
               <div className="timeline">
@@ -176,11 +182,15 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
               </div>
             ) : (
               <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-                还没有可识别的阶段。
+                {job?.status === 'queued'
+                  ? '构建正在排队，开始后会显示阶段。'
+                  : job?.status === 'running'
+                    ? '正在等待首个构建阶段。'
+                    : '这次运行没有阶段记录。'}
               </p>
             )}
           </div>
-        </Card>
+        </Card>}
 
         <Card title="详情">
           <div className="body">

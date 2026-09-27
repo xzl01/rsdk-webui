@@ -89,11 +89,19 @@ export function upsertJob(job: Job): Job {
   else data.jobs.unshift(job)
 
   if (data.jobs.length > config.jobRetention) {
-    const dropped = data.jobs.slice(config.jobRetention)
+    // Never drop a job that is still writing into its bundle directory; only
+    // finished ones may be pruned (this can temporarily exceed the retention).
+    const live = (j: Job) => j.status === 'running' || j.status === 'queued'
+    const kept: Job[] = []
+    const dropped: Job[] = []
+    data.jobs.forEach((j, index) => {
+      if (index < config.jobRetention || live(j)) kept.push(j)
+      else dropped.push(j)
+    })
     for (const j of dropped) {
       if (j.dir) fs.rmSync(j.dir, { recursive: true, force: true })
     }
-    data.jobs = data.jobs.slice(0, config.jobRetention)
+    data.jobs = kept
   }
   persist()
   for (const listener of listeners) listener(job)

@@ -57,8 +57,9 @@ export async function detectMode(): Promise<'server' | 'static'> {
   return detected
 }
 
-export function currentMode(): 'server' | 'static' {
-  return detected ?? 'static'
+/** null until the probe has run, so callers can avoid guessing */
+export function currentMode(): 'server' | 'static' | null {
+  return detected
 }
 
 // ---------------------------------------------------------------------------
@@ -367,8 +368,17 @@ export { safeParseProfile }
  * while the concrete backend is resolved lazily (and may be replaced when the
  * user connects/disconnects in static mode).
  */
+/**
+ * Members only the local server implements. The UI feature-detects these
+ * (`if (!api.fetchImage)`), so in static mode they have to be *absent* - a proxy
+ * that returns a function for every property made every such check true, and
+ * clicking the resulting button threw.
+ */
+const SERVER_ONLY = new Set(['fetchImage', 'downloadGha', 'buildIndex', 'inspectDebs'])
+
 export const api: Backend = new Proxy({} as Backend, {
   get(_target, prop: string) {
+    if (SERVER_ONLY.has(prop) && currentMode() !== 'server') return undefined
     return async (...args: unknown[]) => {
       const resolved = await getBackend()
       const member = (resolved as unknown as Record<string, unknown>)[prop]

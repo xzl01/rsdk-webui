@@ -7,6 +7,39 @@ export const RSDK_BUILD_MOUNT = '/usr/share/rsdk/build'
 
 export const SUPPORTED_STEPS = ['target', 'repos', 'packages', 'system', 'hooks', 'backend'] as const
 
+/**
+ * Guard rails for the values that end up in generated shell, sed patterns or
+ * sources.list lines.
+ *
+ * These are not a privilege boundary - it is the user's own image - but a typo
+ * like `0644 ;` used to produce a silently different command, and a profile is a
+ * document that gets shared (exported, committed to a build branch). Validating
+ * here means both the browser and the server reject it with a readable message.
+ */
+function pattern(re: RegExp, message: string, fallback = '') {
+  return z
+    .string()
+    .default(fallback)
+    .refine((value) => value === '' || re.test(value), message)
+}
+
+/** 0644 / 755 / 00644 ... */
+const fileMode = pattern(/^0?[0-7]{3,4}$/, '权限要写成八进制，例如 0644', '0644')
+/** user or user:group */
+const fileOwner = pattern(/^[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)?$/, '属主应形如 root:root', 'root:root')
+const hostname = pattern(
+  /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/,
+  '主机名只能用字母、数字和连字符，且不能以连字符开头/结尾',
+)
+const timezone = pattern(/^[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)*$/, '时区应形如 Asia/Shanghai')
+/** zh_CN.UTF-8 / C.UTF-8 - it is interpolated into a sed -E pattern */
+const locale = pattern(/^[A-Za-z0-9_.@-]+$/, '区域不能包含正则或 shell 元字符')
+const packageName = pattern(
+  /^[a-z0-9][a-z0-9+.-]*(?::[a-z0-9]+)?(?:\/[a-z0-9-]+)?$/,
+  '软件包名不合法（可带 :架构 或 /suite 后缀）',
+)
+
+
 // ---------------------------------------------------------------------------
 // apt / repos
 // ---------------------------------------------------------------------------
@@ -15,28 +48,28 @@ export const ExtraAptRepoSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   /** base URL, e.g. https://deb.debian.org/debian */
-  url: z.string().min(1),
-  suite: z.string().min(1),
-  components: z.array(z.string()).min(1).default(['main']),
+  url: z.string().min(1).refine((v) => /^https?:\/\/\S+$/.test(v), '仓库地址应为 http(s) URL'),
+  suite: z.string().min(1).refine((v) => /^\S+$/.test(v), 'suite 不能含空白字符'),
+  components: z.array(z.string().regex(/^[A-Za-z0-9-]+$/, '组件名不合法')).min(1).default(['main']),
   /** ASCII-armored key content, stored in the bundle. */
   keyArmored: z.string().default(''),
   /** alternative: fetch the key at build time */
-  keyUrl: z.string().default(''),
+  keyUrl: pattern(/^https?:\/\/\S+$/, '密钥地址应为 http(s) URL'),
   trusted: z.boolean().default(false),
   enabled: z.boolean().default(true),
 })
 
 export const ReposSchema = z.object({
   /** radxa-deb mirror, '' = official */
-  radxaMirror: z.string().default(''),
+  radxaMirror: pattern(/^https?:\/\/\S+$/, '镜像地址应为 http(s) URL'),
   /** debian/ubuntu mirror, '' = upstream default */
-  distroMirror: z.string().default(''),
+  distroMirror: pattern(/^https?:\/\/\S+$/, '镜像地址应为 http(s) URL'),
   /** build against the -test radxa repo */
   testRepo: z.boolean().default(false),
   /** embed Radxa pkgs.json metadata */
   usePkgsJson: z.boolean().default(true),
   /** snapshot.debian.org timestamp, e.g. 20240101T000000Z */
-  snapshot: z.string().default(''),
+  snapshot: pattern(/^[0-9]{8}T[0-9]{6}Z$/, '快照时间戳应形如 20240101T000000Z'),
   extra: z.array(ExtraAptRepoSchema).default([]),
 })
 
@@ -50,9 +83,9 @@ export const PackagesSchema = z.object({
   kernelOverride: z.string().default(''),
   firmwareOverride: z.string().default(''),
   /** extra packages installed by the customize hook, from any configured repo */
-  install: z.array(z.string()).default([]),
+  install: z.array(packageName).default([]),
   /** packages removed after the base system is built */
-  purge: z.array(z.string()).default([]),
+  purge: z.array(packageName).default([]),
   /** apt --no-install-recommends is the default (smaller images) */
   installRecommends: z.boolean().default(false),
   /** host directory of locally built .deb files, passed to rsdk via --debs */
@@ -81,7 +114,10 @@ export const UserSpecSchema = z.object({
   sudo: z.boolean().default(true),
   /** passwordless sudo */
   nopasswd: z.boolean().default(false),
-  shell: z.string().default('/bin/bash'),
+  shell: z
+    .string()
+    .default('/bin/bash')
+    .refine((v) => /^\/[A-Za-z0-9_./-]+$/.test(v), 'shell 必须是绝对路径'),
   sshKeys: z.array(z.string()).default([]),
 })
 
@@ -101,15 +137,15 @@ export const WifiSchema = z.object({
 })
 
 export const SystemSchema = z.object({
-  hostname: z.string().default(''),
-  timezone: z.string().default(''),
-  locale: z.string().default(''),
+  hostname,
+  timezone,
+  locale,
   keyboard: z
     .object({
-      model: z.string().default('pc105'),
-      layout: z.string().default('us'),
-      variant: z.string().default(''),
-      options: z.string().default(''),
+      model: pattern(/^[A-Za-z0-9,;:_-]*$/, '键盘设置只能包含字母、数字和 , ; : _ -', 'pc105'),
+      layout: pattern(/^[A-Za-z0-9,;:_-]*$/, '键盘设置只能包含字母、数字和 , ; : _ -', 'us'),
+      variant: pattern(/^[A-Za-z0-9,;:_-]*$/, '键盘设置只能包含字母、数字和 , ; : _ -'),
+      options: pattern(/^[A-Za-z0-9,;:_-]*$/, '键盘设置只能包含字母、数字和 , ; : _ -'),
     })
     .default({ model: 'pc105', layout: 'us', variant: '', options: '' }),
   user: UserSpecSchema.nullable().default(null),
@@ -126,9 +162,9 @@ export const SystemSchema = z.object({
 export const OverlayFileSchema = z.object({
   id: z.string(),
   /** absolute path inside the target rootfs */
-  path: z.string().min(1),
-  mode: z.string().default('0644'),
-  owner: z.string().default('root:root'),
+  path: z.string().min(1).refine((v) => v.startsWith('/'), '目标路径必须是绝对路径'),
+  mode: fileMode,
+  owner: fileOwner,
   /** inline content; see `encoding` */
   content: z.string().default(''),
   /** how to interpret `content` when materialising the blob */

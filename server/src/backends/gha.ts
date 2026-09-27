@@ -374,6 +374,7 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
   const bin = ghBin()
   let url = runUrl
   let lastStatus = ''
+  let failures = 0
 
   for (;;) {
     const current = getJob(jobId)
@@ -382,9 +383,30 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
     const info = await ghJson<RunInfo>([
       'run', 'view', String(runId), '--repo', repo,
       '--json', 'databaseId,status,conclusion,url,headBranch,createdAt',
-    ]).catch(() => null)
-    if (!info) return
+    ]).catch((err: unknown) => {
+      failures += 1
+      appendLog(
+        jobId,
+        `==> 读取 run 状态失败（第 ${failures} 次）: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      return null
+    })
 
+    if (!info) {
+      // A single hiccup (network, rate limit) used to end the watcher for good,
+      // leaving the job "running" forever. Retry, then say so explicitly.
+      if (failures >= 10) {
+        updateJob(jobId, {
+          status: 'failed',
+          finishedAt: Date.now(),
+          error: `连续 ${failures} 次无法读取 run 状态，已停止跟踪；请到 Actions 页面查看：${url ?? ''}`,
+        })
+        return
+      }
+      await sleep(15_000)
+      continue
+    }
+    failures = 0
     url = info.url
 
     if (info.status !== lastStatus) {
