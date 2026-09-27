@@ -1,0 +1,31 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build output
+web/dist/
+server/dist/
+
+# runtime state
+data/
+.runtime/
+
+# vendored upstream checkouts (rsdk, rsdk-image, ...)
+vendor/
+
+# scratch
+server/scratch/
+*.log
+/tmp/
+
+# generated at deploy time by ops/emit-static-assets.sh (catalog, jsonnet tree,
+# package index) - never committed, always derived from the container image
+web/public/catalog.json
+web/public/boards.json
+web/public/rsdk-tree.json
+web/public/pkgindex/
+
+# local-only working documents (audit snapshots / walkthroughs with run ids);
+# they stay on disk but are not published
+docs/BOARDS.md
+docs/FLOW.md
