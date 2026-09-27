@@ -103,7 +103,7 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
   const isStatic = currentMode() === 'static'
 
   return (
-    <div className="grid-2 job-view" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
+    <div className="grid-2 job-view split-side">
       <Card
         className="job-log"
         title={job ? job.title : '加载中…'}

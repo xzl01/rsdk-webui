@@ -121,7 +121,7 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
   }
 
   return (
-    <div className="grid-2" style={{ gridTemplateColumns: 'minmax(0,1.3fr) minmax(320px,1fr)' }}>
+    <div className="grid-2 split-wide">
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0,1fr)' }}>
         <Card
           title="构建前预检"

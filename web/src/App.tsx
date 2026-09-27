@@ -405,7 +405,7 @@ export default function App() {
 
         {route.kind === 'job' && <JobView jobId={route.id} onBack={() => setRoute({ kind: 'jobs' })} />}
 
-        {route.kind === 'wizard' && stepProps && (
+        {route.kind === 'wizard' && (
           <div className={`wizard-layout${preview ? ' with-preview' : ''}`}>
             <div>
               <div className="page-head">
@@ -426,24 +426,40 @@ export default function App() {
               {!profile && (
                 <div className="card">
                   <div className="empty">
-                    <span className="spin" style={{ width: 18, height: 18, borderWidth: 3 }} />
-                    <div style={{ marginTop: 12 }}>正在读取 rsdk 元数据…</div>
-                    <div className="faint" style={{ marginTop: 6, fontSize: 12 }}>
-                      板子列表直接来自容器镜像里的 rsdk，第一次需要从镜像里导出 jsonnet 树。
-                    </div>
+                    {fatal ? (
+                      <>
+                        <div>读取 rsdk 元数据失败。</div>
+                        <div className="faint mono" style={{ marginTop: 8, fontSize: 11.5 }}>
+                          {fatal}
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <Button onClick={() => void bootstrap()}>重试</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="spin" style={{ width: 18, height: 18, borderWidth: 3 }} />
+                        <div style={{ marginTop: 12 }}>正在读取 rsdk 元数据…</div>
+                        <div className="faint" style={{ marginTop: 6, fontSize: 12 }}>
+                          {mode === 'static'
+                            ? '板子列表来自部署时导出的 catalog.json；还需要向 GitHub 确认仓库状态。'
+                            : '板子列表直接来自容器镜像里的 rsdk，第一次需要从镜像里导出 jsonnet 树。'}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
 
-              {profile && (
+              {profile && stepProps && (
                 <>
-                  {step === 'target' && <TargetStep {...stepProps!} />}
-                  {step === 'repos' && <ReposStep {...stepProps!} />}
-                  {step === 'packages' && <PackagesStep {...stepProps!} />}
-                  {step === 'system' && <SystemStep {...stepProps!} />}
-                  {step === 'hooks' && <HooksStep {...stepProps!} />}
-                  {step === 'backend' && <BackendStep {...stepProps!} />}
-                  {step === 'review' && <ReviewStep {...stepProps!} />}
+                  {step === 'target' && <TargetStep {...stepProps} />}
+                  {step === 'repos' && <ReposStep {...stepProps} />}
+                  {step === 'packages' && <PackagesStep {...stepProps} />}
+                  {step === 'system' && <SystemStep {...stepProps} />}
+                  {step === 'hooks' && <HooksStep {...stepProps} />}
+                  {step === 'backend' && <BackendStep {...stepProps} />}
+                  {step === 'review' && <ReviewStep {...stepProps} />}
 
                   <div className="actions">
                     <Button disabled={stepIndex === 0} onClick={() => setStep(STEPS[Math.max(0, stepIndex - 1)].id)}>

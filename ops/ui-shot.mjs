@@ -14,7 +14,7 @@
 //   --width/--height     viewport size (default 1680x1050)
 //   --port <n>           debug port (default 9333)
 // ---------------------------------------------------------------------------
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 
@@ -35,12 +35,33 @@ while (args.length) {
     case '--height': opt.height = Number(args.shift()); break
     case '--port': opt.port = Number(args.shift()); break
     case '--dump': opt.dump = true; break
+    case '--scheme': opt.scheme = args.shift(); break
     default: throw new Error(`unknown flag ${flag}`)
   }
 }
 if (!url) throw new Error('usage: ui-shot.mjs <url> <out.png> [--wait js] [--eval js] ...')
 
 const chromeBin = process.env.CHROME ?? 'google-chrome-stable'
+
+/**
+ * 静态模式要访问 api.github.com：直连不通时必须走代理，否则请求会一直挂着，
+ * 界面停在半路，测出来的结果就不作数。但如果代理端口没在监听，硬加
+ * --proxy-server 反而把本来直连能通的站点也弄坏，所以先探测端口。
+ */
+function proxyArgs() {
+  const raw = process.env.PROXY ?? 'http://127.0.0.1:7897'
+  try {
+    const url = new URL(raw)
+    const probe = spawnSync('bash', [
+      '-c',
+      `timeout 2 bash -c '</dev/tcp/${url.hostname}/${url.port}' 2>/dev/null`,
+    ])
+    if (probe.status !== 0) return []
+    return [`--proxy-server=${raw}`, '--proxy-bypass-list=localhost;127.0.0.1']
+  } catch {
+    return []
+  }
+}
 const profile = fs.mkdtempSync('/tmp/ui-shot-profile-')
 
 const chrome = spawn(
@@ -48,6 +69,7 @@ const chrome = spawn(
   [
     '--remote-debugging-port=' + opt.port,
     '--headless=new',
+    ...proxyArgs(),
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-gpu',
@@ -114,6 +136,11 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   }, sessionId)
+  if (opt.scheme) {
+    await send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: opt.scheme }],
+    }, sessionId)
+  }
   await send('Page.enable', {}, sessionId)
   await send('Runtime.enable', {}, sessionId)
   // surface page errors instead of silently screenshotting a blank app

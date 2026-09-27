@@ -57,7 +57,7 @@ export function TargetStep({ profile, patch, catalog, verdicts }: StepProps) {
   }
 
   return (
-    <div className="grid-2" style={{ gridTemplateColumns: 'minmax(0,1.35fr) minmax(320px,1fr)' }}>
+    <div className="grid-2 split-wide">
       <Card
         title="选择开发板"
         hint={
