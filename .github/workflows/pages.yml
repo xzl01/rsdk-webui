@@ -1,0 +1,104 @@
+# ---------------------------------------------------------------------------
+# Deploy the web UI itself to GitHub Pages.
+#
+# The Pages site is the *backend-less* build of the UI: it talks straight to
+# api.github.com with a token the user pastes in, so forking this repository and
+# enabling Pages is enough to get your own image builder. See docs/DESIGN.md.
+#
+# The static assets it needs (board catalog, the rsdk jsonnet tree, the package
+# index) are generated here from the *same* container image that builds use, so
+# the site can never offer a board the builder does not have.
+# ---------------------------------------------------------------------------
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - 'shared/**'
+      - 'server/**'
+      - 'ops/emit-static-assets.sh'
+      - 'ops/pkgindex.py'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # runners ship with podman as well as docker; pin the engine so every step
+    # uses the same image store
+    env:
+      RSDK_WEBUI_ENGINE: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      # version comes from packageManager in package.json
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Load the build container image
+        run: ./ops/setup.sh
+
+      - name: Export the static assets
+        run: ./ops/emit-static-assets.sh --with-index
+
+      - name: Build the web app
+        env:
+          # project sites are served from /<repo>/
+          VITE_BASE: /${{ github.event.repository.name }}/
+          # so the "use this template" / "fork" links resolve on any fork
+          VITE_UPSTREAM_REPO: ${{ github.repository }}
+          VITE_PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: pnpm build
+
+      # Creating the Pages site needs admin rights on the repository, which the
+      # workflow's GITHUB_TOKEN does not have ("Resource not accessible by
+      # integration"). Let it try anyway in case a PAT is configured, but fail
+      # with something the user can act on rather than a 403.
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
+      - name: Pages must be enabled once
+        if: steps.pages.outcome == 'failure'
+        run: |
+          url="https://github.com/${{ github.repository }}/settings/pages"
+          echo "::error title=需要先开启 GitHub Pages::打开 $url 把 Source 设为 GitHub Actions，然后重跑这个 workflow"
+          echo "创建 Pages 站点需要仓库管理员权限，Actions 的 GITHUB_TOKEN 没有（fork 出来的仓库也不会自动开）。"
+          exit 1
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
