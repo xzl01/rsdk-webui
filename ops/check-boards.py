@@ -61,20 +61,122 @@ def distro_of(suite: str) -> str:
     return "ubuntu" if suite in UBUNTU_SUITES else "debian"
 
 
+def is_ubuntu(suite: str) -> bool:
+    return suite in UBUNTU_SUITES
+
+
+# rsdk rewrites the *-backports source of an EOL suite to the Debian archive
+# (`sed -i "s|https*://.*/|http://archive.debian.org/|"`), which is what makes
+# bullseye still resolvable even though the suite is gone from the mirrors.
+ARCHIVE = "https://archive.debian.org/debian"
+
+
+def release_exists(url: str) -> bool:
+    probe = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "60", "-I", url], capture_output=True)
+    return probe.returncode == 0
+
+
+def distro_component_url(suite: str, component: str) -> str | None:
+    """
+    The URL apt would actually fetch for (suite, component), after rsdk's setup
+    hooks have rewritten things. None when nothing serves it.
+    """
+    distro = distro_of(suite)
+    if distro == "ubuntu":
+        base = "https://ports.ubuntu.com/ubuntu-ports"
+        candidates = [f"{base}/dists/{suite}/{component}/binary-arm64/Packages.gz"]
+    else:
+        if suite.endswith("-backports"):
+            candidates = [
+                f"https://deb.debian.org/debian/dists/{suite}/{component}/binary-arm64/Packages.xz",
+                f"{ARCHIVE}/dists/{suite}/{component}/binary-arm64/Packages.xz",
+            ]
+        else:
+            base = "https://deb.debian.org/debian"
+            candidates = [f"{base}/dists/{suite}/{component}/binary-arm64/Packages.xz"]
+    for url in candidates:
+        if release_exists(url):
+            return url
+    return None
+
+
+# rsdk adds these on top of the distro + radxa repositories; a package that only
+# lives in one of them is *available*, and missing it here would be a false
+# "upstream cannot build this" claim.
+LAUNCHPAD = "https://ppa.launchpadcontent.net"
+ALWAYS_PPA = {"ubuntu": ["mozillateam/ppa"]}
+PPA_CACHE: dict[tuple[str, str], set[str]] = {}
+
+
+SUITE_SET_CACHE: dict[str, set[str]] = {}
+
+
+def all_distro_names(suite: str) -> set[str]:
+    """
+    Everything apt could install by name for this suite: the base archive plus
+    the updates/backports/security suites rsdk configures. A package with no
+    suite qualifier can come from *any* of them, which is easy to forget and
+    turns into a fabricated "missing package" report.
+    """
+    if suite in SUITE_SET_CACHE:
+        return SUITE_SET_CACHE[suite]
+    names: set[str] = set()
+    for candidate in (suite, f"{suite}-updates", f"{suite}-backports", f"{suite}-security"):
+        names |= qualified_index(candidate)
+    SUITE_SET_CACHE[suite] = names
+    return names
+
+
+def product_ppas(product: dict, socs: list[dict], suite: str) -> list[str]:
+    names = list(ALWAYS_PPA.get(distro_of(suite), []))
+    for entry in socs:
+        if set(entry.get("soc_list", [])) & set(product.get("soc", [])):
+            for ppa in entry.get("extra_ppa") or []:
+                names.append(ppa)
+    return names
+
+
+def ppa_index(ppa: str, suite: str) -> set[str]:
+    key = (ppa, suite)
+    if key in PPA_CACHE:
+        return PPA_CACHE[key]
+    owner, _, name = ppa.partition("/")
+    url = f"{LAUNCHPAD}/{owner}/{name}/ubuntu/dists/{suite}/main/binary-arm64/Packages.gz"
+    tmp = pathlib.Path("/tmp") / f"ppa-{owner}-{name}-{suite}.gz"
+    names: set[str] = set()
+    got = subprocess.run(["curl", "-fsSL", "--max-time", "180", "-o", str(tmp), url], capture_output=True)
+    if got.returncode == 0:
+        text = gzip.decompress(tmp.read_bytes()).decode("utf-8", "replace")
+        for line in text.splitlines():
+            if line.startswith("Package: "):
+                names.add(line[9:].strip())
+    else:
+        print(f"   ! PPA 取不到: {ppa} ({suite})", file=sys.stderr)
+    tmp.unlink(missing_ok=True)
+    PPA_CACHE[key] = names
+    return names
+
+
 def qualified_index(suite: str) -> set[str]:
     """package names available from a specific distro suite (backports/updates/…)"""
     if suite in QUALIFIED_CACHE:
         return QUALIFIED_CACHE[suite]
-    distro = distro_of(suite)
-    base = "https://deb.debian.org/debian" if distro == "debian" else "https://ports.ubuntu.com/ubuntu-ports"
     names: set[str] = set()
-    for component in DISTRO_COMPONENTS[distro]:
-        url = f"{base}/dists/{suite}/{component}/binary-arm64/Packages.xz"
-        tmp = pathlib.Path("/tmp") / f"q-{suite}-{component}.xz"
-        got = subprocess.run(["curl", "-fsSL", "--max-time", "300", "-o", str(tmp), url], capture_output=True)
-        if got.returncode != 0:
+    for component in DISTRO_COMPONENTS['ubuntu' if is_ubuntu(suite) else 'debian']:
+        url = distro_component_url(suite, component)
+        if url is None:
             continue
-        text = subprocess.run(["xz", "-dc", str(tmp)], capture_output=True).stdout.decode("utf-8", "replace")
+        tmp = pathlib.Path("/tmp") / f"q-{suite}-{component}.xz"
+        if url.endswith(".gz"):
+            got = subprocess.run(["curl", "-fsSL", "--max-time", "300", "-o", str(tmp), url], capture_output=True)
+            if got.returncode != 0:
+                continue
+            text = gzip.decompress(tmp.read_bytes()).decode("utf-8", "replace")
+        else:
+            got = subprocess.run(["curl", "-fsSL", "--max-time", "300", "-o", str(tmp), url], capture_output=True)
+            if got.returncode != 0:
+                continue
+            text = subprocess.run(["xz", "-dc", str(tmp)], capture_output=True).stdout.decode("utf-8", "replace")
         for line in text.splitlines():
             if line.startswith("Package: "):
                 names.add(line[9:].strip())
@@ -299,6 +401,10 @@ def main() -> int:
                 problems: list[str] = []
                 warnings: list[str] = []
 
+                ppa_names: set[str] = set()
+                for ppa in product_ppas(product, socs, suite):
+                    ppa_names |= ppa_index(ppa, suite)
+
                 if index is None:
                     problems.append(f"没有 {suite} 的包索引")
                 elif isinstance(rendered_list, str):
@@ -312,6 +418,7 @@ def main() -> int:
                         f"{suite}-updates",
                         f"{suite}-security",
                     }
+                    distro_names = all_distro_names(suite)
                     missing_edition = []
                     for pkg in rendered_list:
                         if "/" in pkg:
@@ -320,16 +427,16 @@ def main() -> int:
                                 missing_edition.append(f"{pkg}(未知 suite 限定)")
                             elif bare not in qualified_index(qualifier):
                                 missing_edition.append(pkg)
-                        elif pkg not in index:
+                        elif pkg not in index and pkg not in ppa_names and pkg not in distro_names:
                             missing_edition.append(pkg)
                     # essential hook: counted against the stable repo, since that
                     # is the default; -test only packages are reported separately
                     def stable(name_: str) -> bool:
                         record = index.get(name_)
-                        return bool(record) and record.get("t") != 1
+                        return (bool(record) and record.get("t") != 1) or name_ in ppa_names
 
                     def anywhere(name_: str) -> bool:
-                        return name_ in index
+                        return name_ in index or name_ in ppa_names
 
                     missing_essential = [pkg for pkg in essential if not stable(pkg)]
                     test_only = [pkg for pkg in missing_essential if anywhere(pkg)]

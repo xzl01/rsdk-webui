@@ -122,6 +122,22 @@ export default function App() {
     return normalizeForProduct(next, product)
   }, [catalog])
 
+  const removeProfile = async (target: Profile) => {
+    if (!confirm(`删除方案「${target.meta.name}」？此操作不可撤销。`)) return
+    try {
+      await api.deleteProfile(target.id)
+      setSaved(await api.profiles())
+      // if it was the one being edited, start from a clean slate rather than
+      // keeping an unsaved copy around
+      if (profile?.id === target.id) {
+        setProfile(setForProduct(await api.newProfile()))
+        setStep('target')
+      }
+    } catch (err) {
+      setToast(String(err instanceof Error ? err.message : err))
+    }
+  }
+
   const save = async () => {
     if (!profile) return
     try {
@@ -316,16 +332,25 @@ export default function App() {
             </div>
             {saved.length === 0 && <p className="faint rail-empty">还没有保存过</p>}
             {saved.map((p) => (
-              <button
-                key={p.id}
-                className={`step saved-profile${profile?.id === p.id ? ' active' : ''}`}
-                onClick={() => setProfile(setForProduct(p))}
-                title={`${p.meta.name} · ${p.target.product} · ${p.target.suite}/${p.target.edition}`}
-                aria-label={`打开方案 ${p.meta.name}，${p.target.product}，${p.target.suite}/${p.target.edition}`}
-              >
-                <span className="num">◆</span>
-                <span className="profile-text"><span className="label">{p.meta.name}</span><small>{p.target.product} · {p.target.suite}</small></span>
-              </button>
+              <div className="saved-profile-row" key={p.id}>
+                <button
+                  className={`step saved-profile${profile?.id === p.id ? ' active' : ''}`}
+                  onClick={() => setProfile(setForProduct(p))}
+                  title={`${p.meta.name} · ${p.target.product} · ${p.target.suite}/${p.target.edition}`}
+                  aria-label={`打开方案 ${p.meta.name}，${p.target.product}，${p.target.suite}/${p.target.edition}`}
+                >
+                  <span className="num">◆</span>
+                  <span className="profile-text"><span className="label">{p.meta.name}</span><small>{p.target.product} · {p.target.suite}</small></span>
+                </button>
+                <button
+                  className="profile-delete"
+                  title={`删除方案「${p.meta.name}」`}
+                  aria-label={`删除方案 ${p.meta.name}`}
+                  onClick={() => void removeProfile(p)}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </>
         ) : (

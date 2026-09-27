@@ -29,3 +29,6 @@ web/public/pkgindex/
 # they stay on disk but are not published
 docs/BOARDS.md
 docs/FLOW.md
+
+# 本地上游 issue 草稿（不随仓库发布）
+docs/upstream-issues/

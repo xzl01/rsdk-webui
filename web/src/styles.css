@@ -272,6 +272,46 @@ pre {
   font-size: 12px;
 }
 
+.saved-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.saved-profile-row .saved-profile {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-delete {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+
+/* keyboard users never hover, so focus has to reveal it too */
+.saved-profile-row:hover .profile-delete,
+.profile-delete:focus-visible {
+  opacity: 1;
+}
+
+.profile-delete:hover {
+  color: var(--danger);
+  border-color: rgba(242, 85, 90, 0.4);
+  background: var(--danger-soft);
+}
+
 .saved-profile .profile-text {
   min-width: 0;
   flex: 1;
