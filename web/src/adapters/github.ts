@@ -626,10 +626,18 @@ export class GitHubAdapter {
    */
   private logCache = new Map<string, string>()
   private logOffset = new Map<string, number>()
+  /** when the "are logs available yet" question was last asked, per run */
+  private logGate = new Map<string, number>()
 
   async readLog(id: string, offset: number): Promise<{ text: string; offset: number; size: number }> {
     const cached = this.logCache.get(id)
     if (cached === undefined) {
+      // GitHub only serves a run's log once it is finished, and the UI polls
+      // every few seconds: asking every time would burn a large part of the
+      // 5000/h API budget on a long build.
+      const last = this.logGate.get(id) ?? 0
+      if (Date.now() - last < 60_000) return { text: '', offset, size: 0 }
+      this.logGate.set(id, Date.now())
       const run = await request<Run>(this.session, `/repos/${this.session.repo}/actions/runs/${id}`)
       if (run.status !== 'completed') return { text: '', offset, size: 0 }
       const response = await fetch(`${API}/repos/${this.session.repo}/actions/runs/${id}/logs`, {

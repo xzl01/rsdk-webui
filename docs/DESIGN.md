@@ -269,6 +269,38 @@ none in that path. What is offered instead:
 Everything else (commits, runs, logs, artifacts) does go straight from the
 browser to `api.github.com`, which is exactly what CORS allows.
 
+## Operational invariants
+
+A few properties are load-bearing, easy to break by accident, and each of them
+was a bug first. They are worth keeping in mind when touching the surrounding
+code:
+
+* **The rootfs cache key carries a generator version.** `rsdk build` reuses an
+  existing `rootfs.tar` wholesale, so a cache hit means the customize hook never
+  runs again. `GENERATOR_VERSION` in `shared/src/render.ts` must be bumped
+  whenever the *shape* of what `customize/install.sh` does changes, or builds keep
+  producing images made by the previous version.
+* **Job pruning must never touch a running job.** It deletes bundle directories,
+  and a live build is writing into one.
+* **Bundles are per submission, the working directory is per profile.** The
+  bundle holds the job record and the exit-code file; `rootfs.tar` lives in the
+  shared working directory because that is the expensive part that should
+  survive.
+* **Long-running polling must survive a hiccup.** A single failed `gh api` call
+  used to end the watcher and leave a job "running" forever.
+* **The container runs as the image's `rsdk` user (uid 1000)**, because
+  `rsdk build` needs its passwordless sudo for bdebstrap. Anything on the host
+  side that must read or write the working directory has to arrange for that
+  (see `hand_over`/`take_back` in `run.sh`).
+* **Nothing cross-origin may reach the HTTP API.** It is served same-origin, so
+  the allowlist exists purely to refuse everyone else; browsers send `Origin` on
+  same-origin non-GET requests too, which is why the server's own origin has to
+  be allowed explicitly.
+* **Generated values that reach a shell are validated, not escaped only.**
+  `mode`, `owner`, `locale`, `hostname` and package names go through the zod
+  schema in `shared/`, so the browser and the server reject the same input with
+  the same message.
+
 ## Deliberate non-goals
 
 * **No reimplementation of rsdk.** The UI never assembles a rootfs itself.

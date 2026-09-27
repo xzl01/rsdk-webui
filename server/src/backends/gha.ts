@@ -37,6 +37,27 @@ async function ghJson<T>(args: string[]): Promise<T> {
   return JSON.parse(r.stdout) as T
 }
 
+/**
+ * Turn the two failures users actually hit into something actionable: a token
+ * without the `workflow` scope cannot touch .github/workflows, and a missing
+ * `repo` scope cannot push at all.
+ */
+function explainGitFailure(stderr: string): string {
+  if (/workflow.*scope|refusing to allow a Personal Access Token/i.test(stderr)) {
+    return (
+      `${stderr}\n\n提示：token 缺少 Workflows 权限 —— 构建包里有 .github/workflows/build.yml。` +
+      '请在 fine-grained token 上勾选 Workflows: Read and write（classic token 则需要 workflow scope）。'
+    )
+  }
+  if (/Authentication failed|403|could not read Username/i.test(stderr)) {
+    return (
+      `${stderr}\n\n提示：token 认证失败或权限不足。fine-grained token 需要 Contents: Read and write，` +
+      '且 Repository access 要包含这个仓库。'
+    )
+  }
+  return `推送失败: ${stderr}`
+}
+
 async function git(args: string[], cwd: string, token: string) {
   // keep the token out of argv
   const helper = `!f() { echo username=x-access-token; echo "password=${token}"; }; f`
@@ -337,7 +358,7 @@ export async function runGhaBuild(jobId: string, profile: Profile, dir: string):
   else await git(['remote', 'add', 'origin', `https://github.com/${gh.repo}.git`], dir, token)
 
   const push = await git(['push', '--force', 'origin', branch], dir, token)
-  if (push.code !== 0) throw new Error(`推送失败: ${push.stderr.trim()}`)
+  if (push.code !== 0) throw new Error(explainGitFailure(push.stderr.trim()))
   updateJob(jobId, { ghBranch: branch, ghRepo: gh.repo })
 
   appendLog(jobId, '==> 等待 workflow 启动')
@@ -375,6 +396,8 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
   let url = runUrl
   let lastStatus = ''
   let failures = 0
+  let queuedSince: number | null = null
+  let queuedHinted = false
 
   for (;;) {
     const current = getJob(jobId)
@@ -413,6 +436,22 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
       lastStatus = info.status
       appendLog(jobId, `==> workflow 状态: ${info.status}`)
       updateJob(jobId, { remote: { status: info.status, conclusion: info.conclusion ?? undefined } })
+    }
+
+    // A run that never leaves "queued" is almost always an Actions billing or
+    // policy problem, and it is completely silent otherwise.
+    if (info.status === 'queued') {
+      queuedSince ??= Date.now()
+      if (!queuedHinted && Date.now() - queuedSince > 10 * 60_000) {
+        queuedHinted = true
+        appendLog(
+          jobId,
+          '!! run 已在队列里超过 10 分钟仍未开始。常见原因：GitHub Actions 分钟数/额度用尽，' +
+            '或仓库的 Actions 策略限制。请查看 https://github.com/settings/billing 。',
+        )
+      }
+    } else {
+      queuedSince = null
     }
 
     // mirror the run's steps into the job timeline, so a GitHub build shows the
