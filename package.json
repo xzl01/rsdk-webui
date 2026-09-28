@@ -11,7 +11,7 @@
     "build": "pnpm -F @rsdk-webui/web build",
     "start": "pnpm -F @rsdk-webui/server start",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -F @rsdk-webui/shared test && pnpm -F @rsdk-webui/server test",
+    "test": "pnpm -F @rsdk-webui/shared test && pnpm -F @rsdk-webui/server test && pnpm -F @rsdk-webui/web test",
     "setup": "./ops/setup.sh"
   },
   "devDependencies": {

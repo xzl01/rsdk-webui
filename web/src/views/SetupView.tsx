@@ -125,7 +125,7 @@ export function SetupView({
               {(!env?.gh.repo?.exists || !env.gh.repo.workflowOnDefaultBranch) && (
                 <div style={{ marginTop: 12 }}>
                   <Note tone="warn">
-                    仓库还不可用。到「构建后端」点「准备仓库」，它会创建/补齐 workflow 并尝试打开 Actions。
+                    仓库还不可用。到「构建后端」点「准备仓库」：它会补上 workflow 并尝试打开 Actions。
                   </Note>
                   {onGotoBackend && (
                     <div style={{ marginTop: 10 }}>
@@ -176,7 +176,7 @@ export function SetupView({
         <div>
           <h1>环境准备</h1>
           <p>
-            rsdk build 需要 bdebstrap、mmdebstrap、qemu-user-static、libguestfs、jsonnet 以及 SYS_ADMIN 权限。
+            rsdk build 需要 bdebstrap、qemu-user-static、libguestfs、jsonnet 和 SYS_ADMIN 权限。
             在本机用容器跑，就不会污染系统。
           </p>
         </div>
@@ -198,7 +198,7 @@ export function SetupView({
             {env?.engine.args && env.engine.args.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <Note tone="info">
-                  检测到默认 podman 存储在 btrfs 上无法使用 overlay 驱动，已自动为 rsdk-webui 使用独立的 storage root
+                  默认 podman 存储在 btrfs 上用不了 overlay 驱动，已自动给 rsdk-webui 单独一个 storage root
                   （<span className="mono">{env.engine.args.join(' ')}</span>），你原有的 podman 容器完全不受影响。
                 </Note>
               </div>

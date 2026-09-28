@@ -3,9 +3,11 @@ import { renderRsdkArgs } from '@rsdk-webui/shared'
 import { comboKey, type PreflightResult } from '@rsdk-webui/shared'
 import { api } from '../api.ts'
 import { Button, Card, Chip, Note, StatusPill, Toggle } from '../ui.tsx'
+import { useBackendEnv } from '../useBackendEnv.ts'
 import type { StepProps } from './types.ts'
 
-export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepProps) {
+export function ReviewStep({ profile, patch, env: baseEnv, goto, mode, verdicts }: StepProps) {
+  const env = useBackendEnv(profile.backend, baseEnv)
   const [check, setCheck] = useState<PreflightResult | null>(null)
   const [ghCheck, setGhCheck] = useState<{ ok: boolean; message: string; url?: string } | null>(null)
   const [checking, setChecking] = useState(false)
@@ -34,7 +36,7 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
     void runPreflight()
     return () => { preflightRequest.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.target.product, profile.target.suite, profile.repos.testRepo, profile.repos.radxaMirror, profile.packages.kernelOverride, profile.packages.firmwareOverride, profile.packages.localDebsDir, profile.packages.debsUrls])
+  }, [profile.target.product, profile.target.suite, profile.target.edition, profile.repos.testRepo, profile.repos.radxaMirror, profile.packages.kernelOverride, profile.packages.firmwareOverride, profile.packages.localDebsDir, profile.packages.debsUrls, profile.packages.vendor, profile.backend.kind])
 
   // the GitHub backend has its own set of prerequisites; check them before the
   // user waits for a push that would fail anyway
@@ -54,17 +56,17 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
       .then((status: import('../api.ts').RepoStatus) => {
         if (stale) return
         if (!status.exists) {
-          setGhCheck({ ok: false, message: `仓库 ${repo} 不存在或无权访问（可在「构建后端」点「准备仓库」创建）` })
+          setGhCheck({ ok: false, message: `仓库 ${repo} 打不开。到「构建后端」点「准备仓库」` })
         } else if (status.actionsEnabled === false) {
           setGhCheck({
             ok: false,
-            message: '该仓库的 Actions 被禁用（fork 默认如此），请在「构建后端」点「准备仓库」启用',
+            message: '该仓库的 Actions 被禁用（fork 默认）。到「构建后端」点「准备仓库」',
             url: `${status.htmlUrl ?? `https://github.com/${repo}`}/actions`,
           })
         } else if (!status.workflowOnDefaultBranch) {
           setGhCheck({
             ok: false,
-            message: `默认分支 ${status.defaultBranch} 上没有 .github/workflows/build.yml，「准备仓库」可以补上`,
+            message: `默认分支上没有 .github/workflows/build.yml，「准备仓库」会补上`,
           })
         } else {
           setGhCheck({ ok: true, message: `仓库就绪：${repo}（${status.private ? '私有' : '公开'}）` })
@@ -99,7 +101,8 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
   const blockers: string[] = []
   if (preflightError) blockers.push('软件源预检失败，请重新检查')
   else if (!check || checking) blockers.push('软件源预检尚未完成')
-  else if (check.repos.length === 0) blockers.push('缺少软件包索引，无法完成构建前预检')
+  else if (check.repos.length === 0 && !check.verified) blockers.push('缺少包索引，无法预检')
+  else if (check.suggestTestRepo && !profile.repos.testRepo) blockers.push('需要启用测试源')
   else if (missingPackages.length > 0) blockers.push(`必需软件包缺失：${missingPackages.join(', ')}`)
   if (profile.backend.kind === 'local-docker') {
     if (!env?.engine.ok) blockers.push('没有可用的容器引擎')
@@ -117,7 +120,7 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
   }
   const verdict = verdicts?.combos[comboKey(profile.target.product, profile.target.suite, profile.target.edition)]
   if (verdict?.status === 'broken') {
-    blockers.push(verdict.hint ?? '这个组合上游无法构建（缺包），换一个 suite/edition 或板子')
+    blockers.push(verdict.hint ?? '这个组合缺包、上游就别想构建出来，换 suite/edition 或板子')
   }
 
   return (
@@ -144,40 +147,42 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
                     </Chip>
                   ))}
                 </div>
-                {check.repos.length === 0 ? (
-                  <Note tone="warn">{check.suggestion ?? '没有可用的软件包索引，无法完成构建前预检。'}</Note>
+                {check.repos.length === 0 && !check.verified ? (
+                  <Note tone="warn">{check.suggestion ?? '没有包索引，无法预检。'}</Note>
+                ) : check.suggestTestRepo && missingPackages.length === 0 ? (
+                  <Note tone="warn">这个组合要启用测试源才能构建。</Note>
                 ) : missingPackages.length === 0 ? (
                   <Note tone="ok">
-                    必需的内核 / u-boot / 板级包都能在软件源或本地软件包中找到：
+                    内核 / u-boot / 板级包都能找到：
                     <span className="mono"> {check.required.join(', ')}</span>
                   </Note>
                 ) : (
                   <>
                     <Note tone="danger">
-                      以下必需软件包在当前软件源里找不到，构建会在组装完基础系统之后失败：
+                      这些必需包找不到，构建会在装完基础系统后失败：
                       <div className="mono" style={{ marginTop: 4 }}>
                         {missingPackages.join(', ')}
                       </div>
                     </Note>
-                    {check.suggestTestRepo && (
-                      <div style={{ marginTop: 10 }}>
-                        <Note tone="info">{check.suggestion}</Note>
-                        <div style={{ marginTop: 8 }}>
-                          <Toggle
-                            checked={profile.repos.testRepo}
-                            onChange={(v) => patch({ repos: { ...profile.repos, testRepo: v } })}
-                            title="改用测试源 (-test)"
-                            desc="rsdk build --test-repo"
-                          />
-                        </div>
-                      </div>
-                    )}
                     {!check.suggestTestRepo && check.suggestion && (
                       <div style={{ marginTop: 10 }}>
                         <Note tone="warn">{check.suggestion}</Note>
                       </div>
                     )}
                   </>
+                )}
+                {check.suggestTestRepo && (
+                  <div style={{ marginTop: 10 }}>
+                    <Note tone="info">{check.suggestion}</Note>
+                    <div style={{ marginTop: 8 }}>
+                      <Toggle
+                        checked={profile.repos.testRepo}
+                        onChange={(v) => patch({ repos: { ...profile.repos, testRepo: v } })}
+                        title="改用测试源 (-test)"
+                        desc="rsdk build --test-repo"
+                      />
+                    </div>
+                  </div>
                 )}
               </>
             )}
@@ -210,8 +215,8 @@ export function ReviewStep({ profile, patch, env, goto, mode, verdicts }: StepPr
             <pre className="code wrap">{`rsdk ${renderRsdkArgs(profile).join(' ')}`}</pre>
             <p className="desc">
               {profile.backend.kind === 'local-docker'
-                ? '这条命令会在 rsdk 容器里执行；外面再套一层 podman/docker run（–-privileged、挂载 /dev、独立 storage root）。'
-                : '这条命令会在 GitHub Actions 的 ubuntu-latest 上执行，构建包先推送到仓库分支。'}
+                ? '在 rsdk 容器里执行，外面再包一层 podman/docker run（特权、挂 /dev、独立 storage root）。'
+                : '在 GitHub Actions 的 ubuntu-latest 上执行，构建包先推送到仓库分支。'}
             </p>
           </div>
         </Card>

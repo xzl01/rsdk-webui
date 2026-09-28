@@ -351,6 +351,7 @@ type RunInfo = {
   conclusion: string | null
   url: string
   headBranch: string
+  headSha: string
   createdAt: string
 }
 
@@ -382,6 +383,9 @@ export async function runGhaBuild(jobId: string, profile: Profile, dir: string):
   if (hasOrigin.code === 0) await git(['remote', 'set-url', 'origin', `https://github.com/${gh.repo}.git`], dir, token)
   else await git(['remote', 'add', 'origin', `https://github.com/${gh.repo}.git`], dir, token)
 
+  const head = await git(['rev-parse', 'HEAD'], dir, token)
+  if (head.code !== 0) throw new Error('无法读取构建 commit')
+  const commit = head.stdout.trim()
   const push = await git(['push', '--force', 'origin', branch], dir, token)
   if (push.code !== 0) throw new Error(explainGitFailure(push.stderr.trim()))
   updateJob(jobId, { ghBranch: branch, ghRepo: gh.repo })
@@ -391,11 +395,12 @@ export async function runGhaBuild(jobId: string, profile: Profile, dir: string):
   for (let i = 0; i < 40; i++) {
     await sleep(3000)
     const runs = await ghJson<RunInfo[]>([
-      'run', 'list', '--repo', gh.repo, '--branch', branch, '--limit', '1',
-      '--json', 'databaseId,status,conclusion,url,headBranch,createdAt',
+      'run', 'list', '--repo', gh.repo, '--branch', branch, '--workflow', 'build.yml', '--commit', commit, '--event', 'push', '--limit', '30',
+      '--json', 'databaseId,status,conclusion,url,headBranch,headSha,createdAt',
     ])
-    if (runs[0]) {
-      run = runs[0]
+    const matching = runs.find((candidate) => candidate.headSha === commit)
+    if (matching) {
+      run = matching
       break
     }
   }
@@ -430,7 +435,7 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
 
     const info = await ghJson<RunInfo>([
       'run', 'view', String(runId), '--repo', repo,
-      '--json', 'databaseId,status,conclusion,url,headBranch,createdAt',
+      '--json', 'databaseId,status,conclusion,url,headBranch,headSha,createdAt',
     ]).catch((err: unknown) => {
       failures += 1
       appendLog(
@@ -501,12 +506,6 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
 
     if (info.status === 'completed') {
       const ok = info.conclusion === 'success'
-      updateJob(jobId, {
-        status: ok ? 'succeeded' : 'failed',
-        finishedAt: Date.now(),
-        remote: { status: info.status, conclusion: info.conclusion ?? undefined },
-        ...(ok ? {} : { error: `workflow 结束: ${info.conclusion}` }),
-      })
 
       const logs = await tryRun(bin, ['run', 'view', String(runId), '--repo', repo, '--log'], {
         timeoutMs: 180_000,
@@ -535,6 +534,13 @@ export async function watchRun(jobId: string, repo: string, runId: number, runUr
           /* ignore */
         }
       }
+      if (getJob(jobId)?.status === 'cancelled') return
+      updateJob(jobId, {
+        status: ok ? 'succeeded' : 'failed',
+        finishedAt: Date.now(),
+        remote: { status: info.status, conclusion: info.conclusion ?? undefined },
+        ...(ok ? {} : { error: `workflow 结束: ${info.conclusion}` }),
+      })
       return
     }
     await sleep(15_000)

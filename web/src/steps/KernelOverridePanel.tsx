@@ -87,14 +87,20 @@ export function KernelOverridePanel({
     >
       <div className="body">
         <p className="desc" style={{ marginTop: 0 }}>
-          rsdk 没有"替换内核"开关。真正的机制是 <span className="mono">--debs</span>：把你给的 .deb
-          发布成本地 apt 源并钉在 <span className="mono">pin 1999</span>，于是<b>同名包会直接赢过仓库版本</b>；
-          如果你的包改了名字，再用 <span className="mono">-k</span> / <span className="mono">-f</span> 告诉
-          构建该装哪个名字。
+          给 .deb 就会用它顶掉仓库里的同名包。改了包名才需要在下面填名字。
         </p>
+        <details className="help-details" style={{ marginBottom: 10 }}>
+          <summary>它到底怎么生效的</summary>
+          <p>
+            rsdk 没有"替换内核"开关。机制是 <span className="mono">--debs</span>：把你给的 .deb 发布成
+            本地 apt 源并钉在 <span className="mono">pin 1999</span>，所以同名包直接赢过仓库版本；
+            改了名字再用 <span className="mono">-k</span> / <span className="mono">-f</span> 告诉构建
+            该装哪个名字。
+          </p>
+        </details>
 
         <div className="row">
-          <Field label={`内核包名 (-k)`} desc={`不改就装 linux-image-${profile.target.product}`}>
+          <Field label={`内核包名 (-k)`} desc={`留空则装 linux-image-${profile.target.product}`}>
             <TextInput
               mono
               value={profile.packages.kernelOverride}
@@ -102,7 +108,7 @@ export function KernelOverridePanel({
               placeholder={profile.target.product}
             />
           </Field>
-          <Field label={`引导包名 (-f)`} desc={`${prefix}-<名>；不改就装 ${prefix}-${profile.target.product}`}>
+          <Field label={`引导包名 (-f)`} desc={`留空则装 ${prefix}-${profile.target.product}`}>
             <TextInput
               mono
               value={profile.packages.firmwareOverride}
@@ -118,8 +124,8 @@ export function KernelOverridePanel({
           label="本地 .deb 目录"
           desc={
             api.inspectDebs
-              ? '宿主机的目录，其中的 .deb 会被复制进构建包。通常就是你内核/u-boot 仓库里 make deb 的产物目录。'
-              : '本机构建专用：GitHub Pages 模式读不到你磁盘上的目录，请改用下载地址。'
+              ? '目录里的 .deb 会复制进构建包。通常是 make deb 的产物目录'
+              : '只有本机构建能用，静态模式读不到你的磁盘。'
           }
         >
           <TextInput
@@ -132,7 +138,7 @@ export function KernelOverridePanel({
 
         <Field
           label=".deb 下载地址（每行一个）"
-          desc="在构建容器里下载。这是把自带内核送上 GitHub Actions 的唯一方式 —— 例如你自己内核仓库的 Release 附件。"
+          desc="在构建容器里下载。GitHub Actions 上只能靠它，例如内核仓库的 Release 附件"
         >
           <textarea
             rows={3}
@@ -146,7 +152,7 @@ export function KernelOverridePanel({
           checked={profile.packages.recordProvenance}
           onChange={(v) => setPackages({ recordProvenance: v })}
           title="在镜像里记录实际装到的内核/引导版本"
-          desc="写入 /etc/rsdk/webui-packages.txt 并打进构建日志，方便确认你的内核真的被采用了"
+          desc="写入 /etc/rsdk/webui-packages.txt 并打进日志，确认你的内核真被用上了"
         />
       </div>
 
@@ -218,7 +224,7 @@ export function KernelOverridePanel({
           {report.fromRepos.length > 0 && report.provided.length > 0 && (
             <p className="desc">
               仍然从仓库获取：<span className="mono">{report.fromRepos.join(', ')}</span>
-              。如果你替换的是内核 ABI，通常还需要一并提供对应的 headers。
+              。换内核 ABI 时通常要一起给 headers。
             </p>
           )}
         </div>
@@ -226,10 +232,10 @@ export function KernelOverridePanel({
 
       <div className="body">
         <p className="desc" style={{ margin: 0 }}>
-          典型做法：在自己的内核仓库里 <span className="mono">make deb</span>，把生成的
+          用 <span className="mono">make deb</span> 生成，把
           <span className="mono"> linux-image-*</span> / <span className="mono">linux-headers-*</span>（U-Boot 则是
-          <span className="mono"> {prefix}-latest</span> 这类被依赖的二进制包）一起放进目录或发到 Release。
-          记得把<b>同一批</b>包都带上，避免只换了一半导致依赖关系断裂。
+          <span className="mono"> {prefix}-latest</span> 这类被依赖的包）一起放进目录或发到 Release。
+          记得把<b>同一批</b>包都带上，只换一半会断依赖。
         </p>
       </div>
     </Card>

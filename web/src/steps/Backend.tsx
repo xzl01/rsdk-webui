@@ -1,15 +1,17 @@
 import type { EnvStatus, GhBackend, LocalBackend } from '@rsdk-webui/shared'
 import { GhRepoPanel } from './GhRepoPanel.tsx'
 import { Card, Chip, Field, Note, Select, TextInput, Toggle, bytes } from '../ui.tsx'
+import { useBackendEnv } from '../useBackendEnv.ts'
 import type { StepProps } from './types.ts'
 
-export function BackendStep({ profile, patch, env, mode }: StepProps) {
+export function BackendStep({ profile, patch, env: baseEnv, mode }: StepProps) {
+  const env = useBackendEnv(profile.backend, baseEnv)
   const staticMode = mode === 'static'
   const gh = profile.backend.kind === 'gh-actions' ? (profile.backend as GhBackend) : null
   const local = profile.backend.kind === 'local-docker' ? (profile.backend as LocalBackend) : null
 
-  const setGh = (p: Partial<GhBackend>) => patch({ backend: { ...(gh ?? defaultGh(env)), ...p } })
-  const setLocal = (p: Partial<LocalBackend>) => patch({ backend: { ...(local ?? defaultLocal(env)), ...p } })
+  const setGh = (p: Partial<GhBackend>) => patch({ backend: { ...(gh ?? defaultGh(baseEnv)), ...p } })
+  const setLocal = (p: Partial<LocalBackend>) => patch({ backend: { ...(local ?? defaultLocal(baseEnv)), ...p } })
 
   const setKind = (kind: 'local-docker' | 'gh-actions') => {
     if (kind === 'gh-actions') setGh({})
@@ -33,7 +35,7 @@ export function BackendStep({ profile, patch, env, mode }: StepProps) {
           {staticMode && (
             <div style={{ marginBottom: 14 }}>
               <Note tone="info">
-                这是 GitHub Pages 上的静态站点，没有本机容器 —— 构建在你的仓库里由 Actions 执行。
+                静态站点没有本机容器，构建在你的仓库里由 Actions 跑。
                 想本地构建就 clone 仓库跑 <span className="mono">pnpm start</span>。
               </Note>
             </div>
@@ -84,7 +86,7 @@ export function BackendStep({ profile, patch, env, mode }: StepProps) {
               <hr className="sep" />
               <Field
                 label="分支前缀"
-                desc="每个方案一个分支。构建包会推到 <前缀>/<方案id>，workflow 只监听 build/** 与 runs/**，所以这里只能二选一。"
+                desc="每个方案一个分支，构建包推到 <前缀>/<方案id>。workflow 只监听 build/** 和 runs/**，只能二选一。"
               >
                 <Select
                   value={gh.branchPrefix === 'runs' ? 'runs' : 'build'}
@@ -100,19 +102,19 @@ export function BackendStep({ profile, patch, env, mode }: StepProps) {
                   checked={gh.compress}
                   onChange={(v) => setGh({ compress: v })}
                   title="上传前 xz 压缩镜像"
-                  desc="大幅减小 artifact 体积（4.6GB → ~1GB），多花几分钟"
+                  desc="artifact 从 4.6GB 降到 ~1GB，多花几分钟"
                 />
                 <Toggle
                   checked={gh.publishRelease}
                   onChange={(v) => setGh({ publishRelease: v })}
                   title="同时发布为 Release"
-                  desc="除 Actions artifact 外，再建一个可长期下载的 Release"
+                  desc="再建一个可长期下载的 Release"
                 />
               </div>
               <div style={{ height: 10 }} />
               <Note tone="warn">
-                构建包会提交到 <span className="mono">{gh.branchPrefix}/&lt;id&gt;</span> 分支。如果 profile 里有 Wi‑Fi
-                密码或密码哈希，请不要使用公开仓库。
+                构建包提交到 <span className="mono">{gh.branchPrefix}/&lt;id&gt;</span> 分支。
+                profile 里有 Wi-Fi 密码就别用公开仓库。
               </Note>
             </>
           ) : null}
@@ -126,7 +128,7 @@ export function BackendStep({ profile, patch, env, mode }: StepProps) {
               <>
                 <dt>本机容器</dt>
                 <dd>
-                  使用官方 rsdk-image（Debian 12 + rsdk），等价于 Radxa 官方 CI。arm64 全程走 qemu-user，
+                  用官方 rsdk-image，等同 Radxa CI。arm64 走 qemu-user，
                   一个 CLI 镜像约 20–60 分钟。
                 </dd>
               </>

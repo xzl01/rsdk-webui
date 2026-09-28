@@ -526,6 +526,7 @@ type Run = {
   conclusion: string | null
   html_url: string
   head_branch: string
+  head_sha: string
   run_started_at?: string
   created_at: string
 }
@@ -567,6 +568,8 @@ export class GitHubAdapter {
   constructor(private session: GhSession) {}
 
   async startBuild(profile: Profile, onProgress?: (text: string) => void): Promise<Job> {
+    if (profile.backend.kind !== 'gh-actions' || !profile.backend.repo) throw new Error('未配置 GitHub 构建仓库')
+    this.session = { ...this.session, repo: profile.backend.repo }
     const tree = await loadRsdkTree()
     let entries
     try {
@@ -599,10 +602,10 @@ export class GitHubAdapter {
       await sleep(3000)
       const runs = await request<{ workflow_runs: Run[] }>(
         this.session,
-        `/repos/${this.session.repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=5`,
+        `/repos/${this.session.repo}/actions/workflows/build.yml/runs?branch=${encodeURIComponent(branch)}&head_sha=${encodeURIComponent(commit)}&event=push&per_page=30`,
       )
-      // 不要依赖列表的默认排序假设：显式按 created_at 挑最新的一条
-      run = [...runs.workflow_runs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      // Only this push counts; a previous completed run may still be the newest visible result.
+      run = runs.workflow_runs.filter((candidate) => candidate.head_sha === commit).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
       if (run) break
     }
     if (!run) {
@@ -619,7 +622,7 @@ export class GitHubAdapter {
       throw new Error('推送成功但没有出现 workflow run，请检查仓库的 Actions 页面')
     }
     runByBranch.set(branch, run.id)
-    return jobFromRun(run, [])
+    return { ...jobFromRun(run, []), ghRepo: this.session.repo }
   }
 
   async getJob(id: string): Promise<Job> {
@@ -639,7 +642,7 @@ export class GitHubAdapter {
       }
     }
 
-    const job = jobFromRun(run, steps)
+    const job = { ...jobFromRun(run, steps), ghRepo: this.session.repo }
     if (run.status === 'completed') {
       const artifacts = await request<{ artifacts: Array<{ name: string; size_in_bytes: number; expired: boolean }> }>(
         this.session,

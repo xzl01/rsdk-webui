@@ -25,8 +25,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export class ServerBackend implements Backend {
   readonly mode = 'server' as const
 
-  env() {
-    return req<EnvStatus>('/api/env')
+  env(backend?: Profile['backend']) {
+    const query = backend?.kind === 'local-docker' ? '?' + new URLSearchParams({ engine: backend.engine, image: backend.image }) : ''
+    return req<EnvStatus>('/api/env' + query)
   }
 
   async refreshEnv() {

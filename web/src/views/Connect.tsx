@@ -78,8 +78,8 @@ export function Connect({
         <div>
           <h1>连接你的 GitHub 仓库</h1>
           <p>
-            这个页面是 GitHub Pages 上的纯静态站点，没有后端。构建在你自己的仓库里跑，token 只发往
-            <span className="mono"> api.github.com</span>，方案存在你的浏览器里。
+            纯静态页面，没有后端。构建跑在你自己的仓库里，token 只发往
+            <span className="mono"> api.github.com</span>。
           </p>
         </div>
       </div>
@@ -96,7 +96,7 @@ export function Connect({
               </a>
             </div>
             <p className="desc" style={{ margin: '0 0 12px' }}>
-              模板仓库的 Actions 可直接使用；Fork 会保留与上游的关系，但需要在仓库中启用 Actions。
+              模板：Actions 直接可用。Fork：要手动启用 Actions。
             </p>
             <Field label="仓库名（owner/name）" desc="就是你刚创建的那个">
               <TextInput mono value={repo} onChange={setRepo} placeholder="your-name/rsdk-webui" />
@@ -107,8 +107,8 @@ export function Connect({
         <Card title="② 创建一个只授权这个仓库的 token">
           <div className="body">
             <p className="desc" style={{ marginTop: 0 }}>
-              用 <b>fine-grained token</b>（细粒度），不要用 classic token —— 后者是整个账号的权限。
-              下面的链接会把仓库、有效期和权限都预填好，你只要点 <span className="mono">Generate token</span>。
+              用 <b>fine-grained token</b>，别用 classic（那是整个账号的权限）。
+              下面的链接已填好仓库、权限和有效期，点 <span className="mono">Generate token</span>。
             </p>
             <div className="chips" style={{ margin: '12px 0' }}>
               <a className="btn primary" href={tokenUrl} target="_blank" rel="noreferrer">
@@ -124,7 +124,7 @@ export function Connect({
               </a>
             </div>
             <p className="desc" style={{ marginBottom: 0 }}>
-              请确认 token 仅授权刚填写的仓库，并设置较短有效期。
+              确认只授权这个仓库，有效期尽量短。
             </p>
             <details className="help-details">
               <summary>查看所需权限与 token 保存说明</summary>
@@ -151,9 +151,8 @@ export function Connect({
               </table></div>
             <div style={{ marginTop: 12 }}>
               <Note tone="warn">
-                token 会存在浏览器的 <span className="mono">localStorage</span> 里 ——
-                任何能在这台机器上打开这个站点（或运行脚本）的人都能读走它。所以请务必：只用细粒度 token、
-                只勾这一个仓库、设一个较短的有效期，不用了就去
+                token 存在浏览器 <span className="mono">localStorage</span> 里，能打开这个站点的人都能读走。
+                所以：只用细粒度 token、只勾这一个仓库、有效期设短一点。不用了去
                 <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noreferrer">
                   {' '}
                   设置里撤销 ↗

@@ -166,7 +166,7 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
               <TextInput
                 value={query}
                 onChange={setQuery}
-                placeholder={meta ? '搜索软件包名或描述…' : '建立索引后可按包名/描述搜索'}
+                placeholder={meta ? '搜索软件包名或描述…' : '建立索引后可按包名搜索'}
               />
               {query.trim() && (
                 <div style={{ flex: 'none' }}>
@@ -185,7 +185,7 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
               <div style={{ marginTop: 10 }}>
                 <Note tone="warn">
                   这个站点没有为 <span className="mono">{profile.target.suite}</span>{' '}
-                  部署包索引，只能手动输入包名。部署时加上 <span className="mono">--with-index</span> 即可。
+                  部署索引，只能手输包名。部署时加 <span className="mono">--with-index</span> 即可。
                 </Note>
               </div>
             )}
@@ -249,7 +249,7 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
               ))}
             </div>
             <p className="desc" style={{ marginTop: 10 }}>
-              点击会把该组合里尚未选中的包加入列表。{PACKAGE_PRESETS[0].description} …
+              把该组合里还没选的包一次加进来。
             </p>
           </div>
         </Card>
@@ -260,7 +260,7 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
           <div className="body">
             {install.length === 0 ? (
               <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-                还没有选择额外软件包。基础系统由 rsdk 的 edition 决定，这里只加“额外”的部分。
+                还没加额外软件包。基础系统由 edition 决定。
               </p>
             ) : (
               <div className="chips">
@@ -290,21 +290,21 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
               checked={profile.packages.installRecommends}
               onChange={(v) => patch({ packages: { ...profile.packages, installRecommends: v } })}
               title="安装推荐依赖 (Recommends)"
-              desc="关闭（默认）只装必要依赖，镜像更小；开启可减少“少装了东西”的意外。"
+              desc="关（默认）只装必要依赖，镜像更小；开则少踩缺依赖的坑"
             />
             <div style={{ height: 8 }} />
             <Toggle
               checked={profile.packages.vendor}
               onChange={(v) => patch({ packages: { ...profile.packages, vendor: v } })}
               title="安装 Radxa 厂商包"
-              desc="关闭对应 rsdk --no-vendor-packages，一般只在自行提供内核/固件时需要。"
+              desc="对应 rsdk --no-vendor-packages。自带内核/固件时才关"
             />
             <div style={{ height: 8 }} />
             <Toggle
               checked={profile.packages.noCache}
               onChange={(v) => patch({ packages: { ...profile.packages, noCache: v } })}
               title="总是重建 rootfs (--no-cache)"
-              desc="默认会复用上次的 rootfs.tar 以省时间；只要涉及 rootfs 的配置变了，会自动改用 --no-cache。开启此项则每次都重建。"
+              desc="默认复用上次的 rootfs.tar 省时间；配置一变会自动加 --no-cache。开了就每次重建"
             />
           </div>
         </Card>
@@ -337,7 +337,7 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
                 </Button>
               </div>
             </div>
-            <p className="desc">在定制钩子里用 apt purge --auto-remove 卸载，例如去掉不需要的桌面组件。</p>
+            <p className="desc">用 apt purge --auto-remove 卸载，例如去掉不用的桌面组件。</p>
           </div>
         </Card>
       </div>

@@ -106,14 +106,14 @@ export function TargetStep({ profile, patch, catalog, verdicts }: StepProps) {
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0,1fr)' }}>
         <Card title="系统与版本">
           <div className="body">
-            <Field label="发行版版本 (suite)" desc="由该板子的 BSP 支持情况决定">
+            <Field label="发行版版本 (suite)" desc="跟随板子的 BSP 支持">
               <Select
                 value={profile.target.suite}
                 onChange={(v) => patch({ target: { ...profile.target, suite: v } })}
                 options={(selected?.supported_suite ?? [profile.target.suite]).map((s) => ({ label: s, value: s }))}
               />
             </Field>
-            <Field label="版本 (edition)" desc="决定预装的桌面环境与软件集合">
+            <Field label="版本 (edition)" desc="预装的桌面与软件集">
               <Select
                 value={profile.target.edition}
                 onChange={(v) => patch({ target: { ...profile.target, edition: v } })}
@@ -123,7 +123,7 @@ export function TargetStep({ profile, patch, catalog, verdicts }: StepProps) {
                 }))}
               />
             </Field>
-            <Field label="扇区大小" desc="eMMC/UFS 使用 4096，SD 卡与多数设备使用 512">
+            <Field label="扇区大小" desc="eMMC/UFS 用 4096，SD 卡用 512">
               <Select
                 value={String(profile.target.sectorSize) as '512' | '4096'}
                 onChange={(v) => patch({ target: { ...profile.target, sectorSize: Number(v) as 512 | 4096 } })}
@@ -157,7 +157,7 @@ export function TargetStep({ profile, patch, catalog, verdicts }: StepProps) {
               <TextInput
                 value={profile.meta.notes}
                 onChange={(v) => patch({ meta: { ...profile.meta, notes: v } })}
-                placeholder="这块镜像打算给谁用、装在哪台设备上"
+                placeholder="给谁用、装在哪台设备上"
               />
             </Field>
           </div>

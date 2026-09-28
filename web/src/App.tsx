@@ -417,13 +417,13 @@ export default function App() {
                   </span>
                   <h1>{STEPS[stepIndex]?.label}</h1>
                   <p>
-                    {step === 'target' && '选择目标板子与系统版本，后续可选值会自动跟随该板子的 BSP 支持范围。'}
-                    {step === 'repos' && '决定从哪里取包。国内网络建议换成 USTC / 清华镜像。'}
-                    {step === 'packages' && '在 edition 预置集合之上增删软件包。建立索引后可以按包名和描述搜索。'}
-                    {step === 'system' && '主机名、时区、首个用户、SSH 与 Wi-Fi，全部在构建时写进镜像。'}
-                    {step === 'hooks' && '往 rootfs 里塞文件，或直接跑自己的脚本。'}
-                    {step === 'backend' && '选择在本机容器里构建，还是丢给 GitHub Actions。'}
-                    {step === 'review' && '最后检查一遍：预检会提前发现软件包缺失，避免白等半小时。'}
+                    {step === 'target' && '选一块板子，确认系统版本和扇区大小。'}
+                    {step === 'repos' && '选从哪取包。国内建议换 USTC 或清华镜像。'}
+                    {step === 'packages' && '在预置套装之外，加装或移除软件包。'}
+                    {step === 'system' && '设置主机名、时区、用户、SSH 和 Wi-Fi。'}
+                    {step === 'hooks' && '放自己的文件，或加一段构建时脚本。'}
+                    {step === 'backend' && '选在哪构建：本机容器，或 GitHub Actions。'}
+                    {step === 'review' && '确认无误后开始构建。预检会先报缺包。'}
                   </p>
                 </div>
               </div>
@@ -447,8 +447,8 @@ export default function App() {
                         <div style={{ marginTop: 12 }}>正在读取 rsdk 元数据…</div>
                         <div className="faint" style={{ marginTop: 6, fontSize: 12 }}>
                           {mode === 'static'
-                            ? '板子列表来自部署时导出的 catalog.json；还需要向 GitHub 确认仓库状态。'
-                            : '板子列表直接来自容器镜像里的 rsdk，第一次需要从镜像里导出 jsonnet 树。'}
+                            ? '正在向 GitHub 确认仓库状态…'
+                            : '第一次要从 rsdk 镜像里导出板子列表，稍等。'}
                         </div>
                       </>
                     )}

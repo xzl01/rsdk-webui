@@ -13,8 +13,8 @@ export type Engine = {
   rootless: boolean
 }
 
-let cachedEngine: Engine | null | undefined
-let detecting: Promise<Engine | null> | null = null
+const engines = new Map<string, Engine | null>()
+const detecting = new Map<string, Promise<Engine | null>>()
 
 async function probePodman(bin: string, args: string[]): Promise<boolean> {
   const r = await tryRun(bin, [...args, 'info', '--format', '{{.Host.Security.Rootless}}'], { timeoutMs: 30_000 })
@@ -29,25 +29,22 @@ async function probePodman(bin: string, args: string[]): Promise<boolean> {
  * dedicated storage root using the native btrfs driver - isolated from the
  * user's own podman store, so we can never break their existing containers.
  */
-export async function detectEngine(force = false): Promise<Engine | null> {
-  if (!force && cachedEngine !== undefined) return cachedEngine
-  // never probe twice in parallel: overlapping `podman info` calls can fail on
-  // the storage lock and would make us think no engine is available
-  if (!force && detecting) return detecting
-  cachedEngine = undefined
-  detecting = detect(force).finally(() => {
-    detecting = null
-  })
-  return detecting
+export async function detectEngine(force = false, requested?: 'podman' | 'docker'): Promise<Engine | null> {
+  const key = requested ?? config.engineOverride ?? 'auto'
+  if (!force && engines.has(key)) return engines.get(key)!
+  const pending = detecting.get(key)
+  if (pending) return pending
+  const promise = serialized(() => detect(requested)).then((engine) => {
+    engines.set(key, engine)
+    return engine
+  }).finally(() => detecting.delete(key))
+  detecting.set(key, promise)
+  return promise
 }
 
-async function detect(force: boolean): Promise<Engine | null> {
-  cachedEngine = null
-
-  const order: Array<'podman' | 'docker'> = config.engineOverride
-    ? [config.engineOverride]
-    : ['podman', 'docker']
-
+async function detect(requested?: 'podman' | 'docker'): Promise<Engine | null> {
+  const selected = requested ?? config.engineOverride
+  const order: Array<'podman' | 'docker'> = selected ? [selected] : ['podman', 'docker']
   for (const kind of order) {
     const bin = which(kind)
     if (!bin) continue
@@ -85,7 +82,7 @@ async function detect(force: boolean): Promise<Engine | null> {
     if (!ok) continue
 
     const rootless = process.getuid?.() !== 0 && kind === 'podman'
-    cachedEngine = {
+    const engine: Engine = {
       kind,
       binary: bin,
       version,
@@ -95,14 +92,14 @@ async function detect(force: boolean): Promise<Engine | null> {
       runExtra: rootless ? ['--userns=keep-id'] : [],
       rootless,
     }
-    return cachedEngine
+    return engine
   }
 
   return null
 }
 
-export async function engineStatus(): Promise<EnvStatus['engine']> {
-  const engine = await detectEngine()
+export async function engineStatus(requested?: 'podman' | 'docker'): Promise<EnvStatus['engine']> {
+  const engine = await detectEngine(false, requested)
   if (!engine) {
     return {
       kind: 'none',
@@ -129,11 +126,11 @@ export async function engineStatus(): Promise<EnvStatus['engine']> {
 /** Run a command inside the engine with the global args already applied. */
 export async function engineRun(
   args: string[],
-  opts: Parameters<typeof run>[2] & { retries?: number } = {},
+  opts: Parameters<typeof run>[2] & { retries?: number; engine?: Engine } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  const engine = await detectEngine()
+  const engine = opts.engine ?? await detectEngine()
   if (!engine) return { code: -1, stdout: '', stderr: 'no container engine available' }
-  const { retries = 0, ...runOpts } = opts
+  const { retries = 0, engine: _engine, ...runOpts } = opts
   let last: { code: number; stdout: string; stderr: string } = { code: -1, stdout: '', stderr: '' }
   for (let attempt = 0; attempt <= retries; attempt++) {
     // a running build holds podman's storage lock, so read-only queries can
@@ -163,34 +160,36 @@ export type ImageStatus = {
   createdAt?: string
 }
 
-let lastImageStatus: ImageStatus | null = null
+const lastImageStatuses = new Map<string, ImageStatus>()
 
-export async function imageStatus(): Promise<ImageStatus> {
-  const engine = await detectEngine()
-  if (!engine) return { ref: config.image, present: false }
-  const ref = config.image
+export async function imageStatus(ref = config.image, selectedEngine?: Engine): Promise<ImageStatus> {
+  const engine = selectedEngine ?? await detectEngine()
+  if (!engine) return { ref, present: false }
+  const cacheKey = JSON.stringify([engine.binary, engine.args, ref])
   const r = await engineRun(['images', '--format', '{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedAt}}'], {
-    retries: 3,
+    retries: 3, engine,
   })
   // A running build holds podman's storage lock; a failed probe must not make
   // the UI claim the image disappeared. Keep the last known good answer.
-  if (r.code !== 0) return lastImageStatus ?? { ref, present: false }
+  if (r.code !== 0) return lastImageStatuses.get(cacheKey) ?? { ref, present: false }
   const want = normalizeRef(ref)
   for (const line of r.stdout.split('\n')) {
     const [name, id, size, ...rest] = line.split('|')
     if (!name) continue
     if (normalizeRef(name) !== want) continue
-    lastImageStatus = {
+    const status: ImageStatus = {
       ref: name,
       present: true,
       id,
       sizeBytes: parseHumanSize(size),
       createdAt: rest.join('|'),
     }
-    return lastImageStatus
+    lastImageStatuses.set(cacheKey, status)
+    return status
   }
-  lastImageStatus = { ref, present: false }
-  return lastImageStatus
+  const status = { ref, present: false }
+  lastImageStatuses.set(cacheKey, status)
+  return status
 }
 
 function parseHumanSize(v: string | undefined): number | undefined {

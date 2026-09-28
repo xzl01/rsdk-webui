@@ -103,6 +103,8 @@ export type PreflightRepoProbe = {
 
 /** what the "确认构建" step shows before letting you start a build */
 export type PreflightResult = {
+  /** A deployed full-package verdict can verify a combination without an index. */
+  verified?: boolean
   product: string
   suite: string
   testRepo: boolean

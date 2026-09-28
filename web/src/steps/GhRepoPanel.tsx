@@ -70,7 +70,7 @@ export function GhRepoPanel({
     <>
       <Field
         label="构建仓库 (owner/name)"
-        desc="你自己的仓库：fork 本项目、用 «Use this template» 建一个，或让下面的按钮帮你创建。构建包只会推到它自己的分支。"
+        desc="fork 本项目、用模板建一个，或点下面的按钮创建。构建包只推到它自己的分支"
       >
         <TextInput mono value={gh.repo} onChange={(v) => onRepoChange(v)} placeholder="your-name/rsdk-webui-builds" />
       </Field>

@@ -15,8 +15,8 @@ import {
 } from '@rsdk-webui/shared'
 import { config, ensureDirs } from './config.ts'
 import { findProduct, getCatalog, invalidateCatalog } from './catalog.ts'
-import { buildTreeStatus, ensureBuildTree, type BuildTree } from './rsdkTree.ts'
-import { engineStatus, ghStatus, imageStatus } from './env.ts'
+import { ensureBuildTree, type BuildTree } from './rsdkTree.ts'
+import { detectEngine, engineStatus, ghStatus, imageStatus } from './env.ts'
 import { previewBundle } from './bundle.ts'
 import {
   cancelJob,
@@ -95,17 +95,23 @@ export async function buildServer() {
 
   app.get('/api/health', async () => ({ ok: true, version: '0.1.0' }))
 
-  app.get('/api/env', async (): Promise<EnvStatus> => {
+  app.get('/api/env', async (request): Promise<EnvStatus> => {
+    const query = request.query as { engine?: string; image?: string }
+    if (query.engine && query.engine !== 'docker' && query.engine !== 'podman') {
+      throw Object.assign(new Error('invalid container engine'), { statusCode: 400 })
+    }
+    const selected = query.engine as 'docker' | 'podman' | undefined
+    const imageRef = query.image || config.image
+    const resolved = await detectEngine(false, selected)
     const [engine, image, initialTree, gh] = await Promise.all([
-      engineStatus(),
-      imageStatus().catch(() => ({ ref: config.image, present: false })),
-      buildTreeStatus().catch(
+      engineStatus(selected),
+      resolved ? imageStatus(imageRef, resolved) : Promise.resolve({ ref: imageRef, present: false }),
+      ensureBuildTree(false, selected && resolved ? { image: imageRef, engine: resolved } : { image: imageRef }).catch(
         (err): BuildTree => ({ ready: false, path: '', error: String(err instanceof Error ? err.message : err) }),
       ),
       ghStatus(),
     ])
-    // only go back to the engine if we have neither a cached tree nor one on disk
-    const tree = initialTree.ready ? initialTree : await buildTreeStatus(true).catch(() => initialTree)
+    const tree = initialTree
     return {
       server: { version: '0.1.0', dataDir: config.dataDir },
       engine,
@@ -411,7 +417,7 @@ export async function buildServer() {
     const job = getJob(id)
     if (!job?.dir) return reply.code(404).send({ error: 'not found' })
     const rel = (request.params as Record<string, string>)['*']
-    const root = path.resolve(job.dir)
+    const root = path.resolve(job.workDir ?? job.dir)
     const target = path.resolve(root, rel)
     // `startsWith` alone would let /a/bc through when the root is /a/b
     const inside = path.relative(root, target)

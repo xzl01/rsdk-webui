@@ -32,7 +32,7 @@ export function ReposStep({ profile, patch }: StepProps) {
         <div className="body">
           <Field
             label="镜像地址"
-            desc="留空使用官方 https://radxa-repo.github.io。选择第三方镜像时 rsdk 会自动关闭 pkgs.json 元数据。"
+            desc="留空用官方源。换第三方镜像会自动关掉 pkgs.json"
           >
             <Select
               value={repos.radxaMirror}
@@ -45,21 +45,21 @@ export function ReposStep({ profile, patch }: StepProps) {
             onChange={(v) => setRepos({ usePkgsJson: v })}
             disabled={radxaIsThirdParty}
             title="嵌入 pkgs.json 元数据"
-            desc="镜像里带上 radxa-deb 的包版本清单，便于后装软件时做版本对齐。第三方镜像通常不提供。"
+            desc="带上包版本清单，后装软件好对齐版本。第三方镜像通常没有"
           />
           <div style={{ height: 10 }} />
           <Toggle
             checked={repos.testRepo}
             onChange={(v) => setRepos({ testRepo: v })}
             title="使用测试源 (-test)"
-            desc="对应 rsdk build --test-repo，软件比稳定源新，也可能更不稳定。"
+            desc="对应 rsdk build --test-repo。包更新，也更可能出问题"
           />
         </div>
       </Card>
 
       <Card title="上游发行版源">
         <div className="body">
-          <Field label="Debian / Ubuntu 镜像" desc="留空使用上游默认 (deb.debian.org / ports.ubuntu.com)">
+          <Field label="Debian / Ubuntu 镜像" desc="留空用上游默认源">
             <Select
               value={repos.distroMirror}
               onChange={(v) => setRepos({ distroMirror: v })}
@@ -68,7 +68,7 @@ export function ReposStep({ profile, patch }: StepProps) {
           </Field>
           <Field
             label="快照时间戳"
-            desc="使用 snapshot.debian.org 的某个时间点构建，保证可复现。与上面的镜像互斥。"
+            desc="用 snapshot.debian.org 的时间点，可复现。与镜像互斥"
           >
             <TextInput
               mono
@@ -95,7 +95,7 @@ export function ReposStep({ profile, patch }: StepProps) {
         <div className="body">
           {repos.extra.length === 0 && (
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-              需要安装 Radxa 官方源之外的软件（例如 apt.syncthing.net、packages.microsoft.com）时在这里添加。
+              加 Radxa 官方源之外的第三方源，例如 apt.syncthing.net
             </p>
           )}
           {repos.extra.map((repo) => (
@@ -119,7 +119,7 @@ export function ReposStep({ profile, patch }: StepProps) {
                     onChange={(v) => updateRepo(repo.id, { components: v.split(/\s+/).filter(Boolean) })}
                   />
                 </Field>
-                <Field label="签名密钥 URL" desc="留空则需要粘贴公钥或勾选 trusted">
+                <Field label="签名密钥 URL" desc="留空就要粘公钥，或勾 trusted">
                   <TextInput mono value={repo.keyUrl} onChange={(v) => updateRepo(repo.id, { keyUrl: v })} placeholder="https://.../key.gpg" />
                 </Field>
               </div>
@@ -136,7 +136,7 @@ export function ReposStep({ profile, patch }: StepProps) {
                   checked={repo.trusted}
                   onChange={(v) => updateRepo(repo.id, { trusted: v })}
                   title="trusted=yes"
-                  desc="跳过签名校验，只在完全清楚后果时使用"
+                  desc="跳过签名校验，确认后果再用"
                 />
                 <Toggle checked={repo.enabled} onChange={(v) => updateRepo(repo.id, { enabled: v })} title="启用" />
                 <div style={{ flex: 'none' }}>

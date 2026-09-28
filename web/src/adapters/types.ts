@@ -67,7 +67,7 @@ export type RepoSetupResult = {
 export interface Backend {
   readonly mode: 'server' | 'static'
 
-  env(): Promise<EnvStatus>
+  env(backend?: Profile['backend']): Promise<EnvStatus>
   refreshEnv(): Promise<EnvStatus>
   catalog(): Promise<Catalog>
   newProfile(product?: string): Promise<Profile>

@@ -100,7 +100,7 @@ function watchJob(jobId: string): void {
       status: cancelled ? 'cancelled' : code === 0 ? 'succeeded' : 'failed',
       finishedAt: Date.now(),
       exitCode: code,
-      artifacts: listArtifacts(workDir, `/api/jobs/${jobId}/files`),
+      artifacts: listArtifacts(workDir, `/api/jobs/${jobId}/files`, !!started.workDir),
       ...(code === 0 || cancelled ? {} : { error: `run.sh 退出码 ${code}` }),
     })
   }
@@ -203,7 +203,7 @@ export async function startLocalBuild(profile: Profile, existingId?: string): Pr
     return getJob(job.id)!
   }
 
-  const engine = await detectEngine()
+  const engine = await detectEngine(false, profile.backend.kind === 'local-docker' ? profile.backend.engine : undefined)
   if (!engine) {
     updateJob(job.id, { status: 'failed', finishedAt: Date.now(), error: '没有可用的容器引擎' })
     return getJob(job.id)!
@@ -212,7 +212,7 @@ export async function startLocalBuild(profile: Profile, existingId?: string): Pr
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     RSDK_ENGINE: engine.kind,
-    RSDK_IMAGE: config.image,
+    RSDK_IMAGE: profile.backend.kind === 'local-docker' ? profile.backend.image : config.image,
     RSDK_ENGINE_ARGS: engine.args.join(' '),
     RSDK_RUN_EXTRA: engine.runExtra.join(' '),
     RSDK_NO_TTY: '1',
@@ -264,10 +264,10 @@ export async function cancelJob(id: string): Promise<boolean> {
     }
   }
 
-  const engine = await detectEngine()
+  const engine = await detectEngine(false, job.profile?.backend.kind === 'local-docker' ? job.profile.backend.engine : undefined)
   if (engine) {
     const name = `rsdk-webui-${path.basename(job.dir ?? '')}`
-    await engineRun(['rm', '-f', name])
+    await engineRun(['rm', '-f', name], { engine })
   }
 
   updateJob(id, { status: 'cancelled', finishedAt: Date.now(), error: '已取消' })
@@ -390,11 +390,14 @@ export async function reconcileJobsOnStartup(): Promise<{ adopted: number; orpha
   const pending = listJobs().filter((j) => j.status === 'running' || j.status === 'queued')
   if (pending.length === 0) return { adopted: 0, orphaned: 0 }
 
-  const engine = await detectEngine()
-  const containers = new Set<string>()
-  if (engine) {
-    const ps = await engineRun(['ps', '--format', '{{.Names}}'])
-    for (const name of ps.stdout.split('\n')) containers.add(name.trim())
+  const containers = new Map<string, Set<string>>()
+  for (const job of pending.filter((job) => job.backend !== 'gh-actions')) {
+    const requested = job.profile?.backend.kind === 'local-docker' ? job.profile.backend.engine : undefined
+    const key = requested ?? 'auto'
+    if (containers.has(key)) continue
+    const engine = await detectEngine(false, requested)
+    const ps = engine ? await engineRun(['ps', '--format', '{{.Names}}'], { engine }) : null
+    containers.set(key, new Set(ps?.stdout.split('\n').map((name) => name.trim()) ?? []))
   }
 
   let adopted = 0
@@ -408,7 +411,7 @@ export async function reconcileJobsOnStartup(): Promise<{ adopted: number; orpha
         status: code === 0 ? 'succeeded' : 'failed',
         finishedAt: Date.now(),
         exitCode: code,
-        artifacts: listArtifacts(dir, `/api/jobs/${job.id}/files`),
+        artifacts: listArtifacts(job.workDir ?? dir, `/api/jobs/${job.id}/files`, !!job.workDir),
         ...(code === 0 ? {} : { error: `run.sh 退出码 ${code}（服务重启期间结束）` }),
       })
       adopted++
@@ -416,7 +419,8 @@ export async function reconcileJobsOnStartup(): Promise<{ adopted: number; orpha
     }
 
     const container = dir ? `rsdk-webui-${path.basename(dir)}` : ''
-    const alive = container !== '' && containers.has(container)
+    const engineKey = job.profile?.backend.kind === 'local-docker' ? job.profile.backend.engine : 'auto'
+    const alive = container !== '' && !!containers.get(engineKey)?.has(container)
     const fresh = fs.existsSync(job.logPath) && Date.now() - fs.statSync(job.logPath).mtimeMs < ADOPT_FRESH_MS
 
     // GitHub Actions builds are tracked by a polling loop in this process, not

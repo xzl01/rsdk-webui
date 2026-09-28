@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -195,7 +195,7 @@ test('the generated install script is valid bash and covers every feature', () =
     assert.ok(byId.has('customize/blobs/nm-my-wifi.nmconnection'))
     assert.equal(byId.get('customize/blobs/authorized_keys-radxa'), 'ssh-ed25519 AAAA test@host\n')
     assert.equal(byId.get('customize/blobs/authorized_keys-root'), 'ssh-rsa BBBB root@host\n')
-    assert.match(String(byId.get('customize/blobs/nm-my-wifi.nmconnection')), /psk="p@ss word"/)
+    assert.match(String(byId.get('customize/blobs/nm-my-wifi.nmconnection')), /psk=p@ss word/)
     assert.match(String(byId.get('customize/blobs/sshd_config.d.conf')), /PasswordAuthentication no/)
     assert.match(String(byId.get('customize/blobs/sudoers-radxa')), /NOPASSWD:ALL/)
   } finally {
@@ -279,9 +279,12 @@ test('rootfsCacheKey only reacts to rootfs-relevant changes', () => {
   const same = makeProfile()
   assert.equal(rootfsCacheKey(base), rootfsCacheKey(same))
 
-  // image name / sector size / backend do not change the rootfs
+  // Output image name, sector size and engine do not change the rootfs.
   const renamed = makeProfile({ target: { ...base.target, imageName: 'other.img', sectorSize: 4096 } })
   assert.equal(rootfsCacheKey(base), rootfsCacheKey(renamed))
+
+  assert.equal(rootfsCacheKey(base), rootfsCacheKey(makeProfile({ backend: { ...base.backend, engine: 'docker' } })))
+  assert.notEqual(rootfsCacheKey(base), rootfsCacheKey(makeProfile({ backend: { ...base.backend, image: 'custom/toolchain:review' } })))
 
   // packages, repos, system config and files do
   assert.notEqual(rootfsCacheKey(base), rootfsCacheKey(makeProfile({ packages: { install: ['nano'] } })))
@@ -462,20 +465,17 @@ const FULL_PROFILE = makeProfile({
   hooks: { pre: [{ id: 'h1', name: 'my hook', script: 'echo hi\n', enabled: true, inRootfs: false }] },
 })
 
-test('nmKeyfileValue 挡住 keyfile 注入', () => {
-  // 换行/分号/井号如果裸着写进去，就能伪造出新的键甚至新的 section
-  assert.equal(nmKeyfileValue('plain'), '"plain"')
-  assert.equal(nmKeyfileValue('has space'), '"has space"')
-  assert.equal(nmKeyfileValue('inject\npsk=evil'), '"inject\\npsk=evil"')
-  assert.equal(nmKeyfileValue('a"b'), '"a\\"b"')
-  assert.equal(nmKeyfileValue('back\\slash'), '"back\\\\slash"')
-  assert.equal(nmKeyfileValue('tab\there'), '"tab\\there"')
-  // 裸 \r 直接删掉（不是转义），所以 CRLF 会收敛成一个转义后的 \n
-  assert.equal(nmKeyfileValue('cr\rlf'), '"crlf"')
-  assert.equal(nmKeyfileValue('a\r\nb'), '"a\\nb"')
-  // 引号内的值整体只占一行，不会多出键
-  const escaped = nmKeyfileValue('# not a comment\n[new-section]')
-  assert.ok(!escaped.includes('\n'), 'escaped value must stay on one line')
+test('nmKeyfileValue escapes GKeyFile strings without changing literal quotes or CR', () => {
+  assert.equal(nmKeyfileValue('plain'), 'plain')
+  assert.equal(nmKeyfileValue('has space'), 'has space')
+  assert.equal(nmKeyfileValue(' leading'), '\\sleading')
+  assert.equal(nmKeyfileValue('inject\npsk=evil'), 'inject\\npsk=evil')
+  assert.equal(nmKeyfileValue('a"b'), 'a"b')
+  assert.equal(nmKeyfileValue('back\\slash'), 'back\\\\slash')
+  assert.equal(nmKeyfileValue('tab\there'), 'tab\\there')
+  assert.equal(nmKeyfileValue('cr\rlf'), 'cr\\rlf')
+  assert.equal(nmKeyfileValue('a\r\nb'), 'a\\r\\nb')
+  assert.ok(!nmKeyfileValue('# not a comment\n[new-section]').includes('\n'))
 })
 
 test('the generated install hook runs to completion against a fake rootfs', () => {
@@ -518,9 +518,9 @@ test('the generated install hook runs to completion against a fake rootfs', () =
     assert.equal(mode(run.rootfs, 'etc/NetworkManager/system-connections/nm-my-wifi.nmconnection'), 0o600)
     // v3 起 NM keyfile 的值一律带引号（含空格/`#`/引号也不会破坏解析）
     const nm = read(run.rootfs, 'etc/NetworkManager/system-connections/nm-my-wifi.nmconnection')
-    assert.match(nm, /^id="My WiFi"$/m)
-    assert.match(nm, /^ssid="My WiFi"$/m)
-    assert.match(nm, /^psk="p@ss word"$/m)
+    assert.match(nm, /^id=My WiFi$/m)
+    assert.match(nm, /^ssid=77;121;32;87;105;70;105;$/m)
+    assert.match(nm, /^psk=p@ss word$/m)
     assert.ok(
       isSymlinkTo(
         run.rootfs,
@@ -701,4 +701,66 @@ test('the profile schema refuses values that would end up in generated shell', (
   ] as const) {
     assert.equal(safeParseProfile(profile).success, false, `${label} should be refused`)
   }
+})
+
+test('NetworkManager reads the original SSID and PSK from generated keyfiles', (t) => {
+  const cases = [
+    { ssid: 'HomeWiFi', psk: 'password123' },
+    { ssid: '  家庭;"WiFi"\\#', psk: '  p@ss;"word"\\#' },
+    { ssid: '12;34;56;', psk: 'p@ss word' },
+    { ssid: '# [connection]', psk: 'password123 ' },
+  ]
+  const files = cases.map((wifi) => {
+    const bundle = renderBundle(makeProfile({ system: { wifi } }))
+    return String(bundle.find((file) => file.path.endsWith('.nmconnection'))!.content)
+  })
+  const parsed = spawnSync('python3', [new URL('../test-fixtures/read-nm-keyfile.py', import.meta.url).pathname], {
+    input: JSON.stringify(files), encoding: 'utf8',
+  })
+  if (parsed.status === 77 || (parsed.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    t.skip('python3/libnm is not installed')
+    return
+  }
+  assert.equal(parsed.status, 0, parsed.stderr)
+  assert.deepEqual(JSON.parse(parsed.stdout), cases)
+})
+
+test('collect_debs copies actual .deb files, including names with spaces', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rsdk-debs-'))
+  try {
+    const source = path.join(dir, 'bundle with spaces', 'debs')
+    const target = path.join(dir, 'collected')
+    fs.mkdirSync(source, { recursive: true })
+    fs.writeFileSync(path.join(source, 'kernel one.deb'), 'first package')
+    fs.writeFileSync(path.join(source, 'boot.deb'), 'second package')
+    const inner = String(renderBundle(makeProfile({ packages: { localDebsDir: source } }))
+      .find((file) => file.path === 'inner.sh')!.content)
+    const collect = inner.match(/collect_debs\(\) \{[\s\S]*?\n\}/)![0]
+      .replaceAll('/rsdk-bundle', path.join(dir, 'bundle with spaces'))
+    execFileSync('bash', ['-c', `set -euo pipefail\n${collect}\ncollect_debs "$1"`, 'test', target])
+    assert.equal(fs.readFileSync(path.join(target, 'kernel one.deb'), 'utf8'), 'first package')
+    assert.equal(fs.readFileSync(path.join(target, 'boot.deb'), 'utf8'), 'second package')
+    // Empty bundle directories also remain valid.
+    fs.rmSync(source, { recursive: true })
+    fs.mkdirSync(source)
+    execFileSync('bash', ['-c', `set -euo pipefail\n${collect}\ncollect_debs "$1"`, 'test', target])
+    assert.deepEqual(fs.readdirSync(target), [])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a replaced container image invalidates the generated rootfs cache', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rsdk-toolchain-key-'))
+  try {
+    const profile = makeProfile()
+    const inner = String(renderBundle(profile).find((file) => file.path === 'inner.sh')!.content)
+    const selection = inner.match(/KEY_FILE=[\s\S]*?\nfi\n\n# Self-built/)![0].replace(/\n\n# Self-built$/, '')
+    fs.writeFileSync(path.join(dir, '.rsdk-webui-rootfs-key'), `${rootfsCacheKey(profile)}:image-A`)
+    const run = (id: string) => execFileSync('bash', ['-c',
+      `set -euo pipefail\nARGS=()\n${selection}\nprintf 'ARG_COUNT=%s' "\${#ARGS[@]}"`],
+    { encoding: 'utf8', env: { ...process.env, HOME: dir, RSDK_TOOLCHAIN_ID: id, RSDK_FORCE_REBUILD: '0' } })
+    assert.match(run('image-A'), /ARG_COUNT=0$/)
+    assert.match(run('image-B'), /ARG_COUNT=1$/)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

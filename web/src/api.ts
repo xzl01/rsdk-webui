@@ -69,6 +69,22 @@ export function currentMode(): 'server' | 'static' | null {
 const SESSION_KEY = 'rsdk-webui.session'
 const PROFILES_KEY = 'rsdk-webui.profiles'
 
+const JOB_REPOS_KEY = 'rsdk-webui.job-repos'
+function jobRepos(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(JOB_REPOS_KEY) ?? '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed).filter(([, repo]) => typeof repo === 'string'))
+  } catch { return {} }
+}
+function rememberJobRepos(jobs: Array<{ id: string }>, repo: string): void {
+  try {
+    const repos = jobRepos()
+    for (const job of jobs) repos[job.id] = repo
+    localStorage.setItem(JOB_REPOS_KEY, JSON.stringify(repos))
+  } catch { /* Storage failure must not turn a successful submission into an error. */ }
+}
+
 let session: GhSession | null = null
 const sessionListeners = new Set<(s: GhSession | null) => void>()
 
@@ -126,7 +142,7 @@ class StaticBackend implements Backend {
     return new GitHubAdapter(session)
   }
 
-  async env(): Promise<EnvStatus> {
+  async env(_backend?: Profile['backend']): Promise<EnvStatus> {
     return staticEnv(session)
   }
 
@@ -196,19 +212,28 @@ class StaticBackend implements Backend {
   }
 
   startBuild(profile: Profile, onProgress?: (text: string) => void): Promise<Job> {
-    return this.adapter.startBuild(profile, onProgress)
+    if (!session) throw new Error('尚未连接 GitHub')
+    if (profile.backend.kind !== 'gh-actions' || !profile.backend.repo) throw new Error('未配置 GitHub 构建仓库')
+    const repo = profile.backend.repo
+    setSession({ ...session, repo })
+    const adapter = this.adapter
+    return adapter.startBuild(profile, onProgress).then((job) => {
+      rememberJobRepos([job], repo)
+      return job
+    })
   }
 
   /** build branches of the target repository, newest first */
   async jobs(): Promise<Job[]> {
     if (!session) return []
+    const activeSession = session
     const runs = await fetch(
-      `https://api.github.com/repos/${session.repo}/actions/runs?per_page=30`,
-      { headers: { Authorization: `Bearer ${session.token}`, Accept: 'application/vnd.github+json' } },
+      `https://api.github.com/repos/${activeSession.repo}/actions/runs?per_page=30`,
+      { headers: { Authorization: `Bearer ${activeSession.token}`, Accept: 'application/vnd.github+json' } },
     )
       .then((r) => (r.ok ? r.json() : { workflow_runs: [] }))
       .catch(() => ({ workflow_runs: [] }))
-    return (runs.workflow_runs as Array<{ id: number; head_branch: string; status: string; conclusion: string | null; created_at: string; html_url: string }>)
+    const jobs: Job[] = (runs.workflow_runs as Array<{ id: number; head_branch: string; status: string; conclusion: string | null; created_at: string; html_url: string }>)
       // 构建分支前缀可选 build/ 或 runs/（BackendStep 里二选一）
       .filter((run) => /^(build|runs)\//.test(run.head_branch))
       .map((run) => ({
@@ -231,18 +256,26 @@ class StaticBackend implements Backend {
         ghBranch: run.head_branch,
         remote: { status: run.status, conclusion: run.conclusion ?? undefined },
       }))
+    rememberJobRepos(jobs, activeSession.repo)
+    return jobs
+  }
+
+  private jobAdapter(id: string): GitHubAdapter {
+    if (!session) throw new Error('尚未连接 GitHub')
+    const repos = jobRepos()
+    return new GitHubAdapter({ ...session, repo: repos[id] ?? session.repo })
   }
 
   job(id: string): Promise<Job> {
-    return this.adapter.getJob(id)
+    return this.jobAdapter(id).getJob(id)
   }
 
   cancelJob(id: string): Promise<boolean> {
-    return this.adapter.cancel(id)
+    return this.jobAdapter(id).cancel(id)
   }
 
   log(id: string, offset: number) {
-    return this.adapter.readLog(id, offset)
+    return this.jobAdapter(id).readLog(id, offset)
   }
 
   /**
@@ -260,7 +293,7 @@ class StaticBackend implements Backend {
     // edition's *whole* package list, not just the four essential packages.
     const verdicts = await loadVerdicts().catch(() => null)
     const verdict = verdicts?.combos[comboKey(profile.target.product, profile.target.suite, profile.target.edition)]
-    if (verdict && verdict.status !== 'ok') {
+    if (verdict && (verdict.status === 'broken' || (verdict.status === 'test' && !profile.repos.testRepo))) {
       const needsTest = verdict.status === 'test'
       return {
         product: profile.target.product,
@@ -269,6 +302,7 @@ class StaticBackend implements Backend {
         required,
         missing: verdict.missing ?? [],
         repos: [],
+        verified: true,
         suggestTestRepo: needsTest && !profile.repos.testRepo,
         suggestion: verdict.hint ?? (needsTest ? '这个组合需要打开「使用测试源」。' : '这个组合上游无法构建。'),
         checkedAt: Date.now(),

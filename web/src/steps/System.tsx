@@ -59,7 +59,7 @@ export function SystemStep({ profile, patch }: StepProps) {
       <Card title="系统标识">
         <div className="body">
           <div className="row">
-            <Field label="主机名" desc="留空保留 rsdk 默认（等于板子名）">
+            <Field label="主机名" desc="留空用 rsdk 默认（板子名）">
               <TextInput mono value={s.hostname} onChange={(v) => setSystem({ hostname: v })} placeholder="rock-5b" />
             </Field>
             <Field label="时区">
@@ -115,7 +115,7 @@ export function SystemStep({ profile, patch }: StepProps) {
             </div>
             <Field
               label="密码"
-              desc="密码在浏览器里就被哈希成 crypt(3) sha512，明文不会发到后端，也不会写进 profile.json。"
+              desc="密码在浏览器里就哈希成 crypt(3) sha512，明文不出本机"
             >
               <div className="row tight">
                 <TextInput
@@ -158,7 +158,7 @@ export function SystemStep({ profile, patch }: StepProps) {
                 onChange={(v) => setUser({ nopasswd: v })}
                 disabled={!s.user.sudo}
                 title="免密码 sudo"
-                desc="写入 /etc/sudoers.d，方便自动化脚本"
+                desc="写入 /etc/sudoers.d"
               />
             </div>
             <hr className="sep" />
@@ -174,7 +174,7 @@ export function SystemStep({ profile, patch }: StepProps) {
         ) : (
           <div className="body">
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-              镜像将只保留系统默认账户（root / radxa 视 edition 而定）。
+              只保留系统默认账户
             </p>
           </div>
         )}
@@ -192,7 +192,7 @@ export function SystemStep({ profile, patch }: StepProps) {
               onChange={(v) => setSystem({ ssh: { ...s.ssh, passwordAuth: v } })}
               disabled={!s.ssh.enabled}
               title="允许密码登录"
-              desc="关闭时只能使用密钥登录，更安全（默认关闭）"
+              desc="关掉就只能用密钥登录（推荐）"
             />
           </div>
           <div style={{ height: 10 }} />
@@ -260,14 +260,14 @@ export function SystemStep({ profile, patch }: StepProps) {
             <Toggle checked={s.wifi.autoconnect} onChange={(v) => setWifi({ autoconnect: v })} title="自动连接" />
             <div style={{ height: 12 }} />
             <Note tone="warn">
-              会以明文写入镜像里的 <span className="mono">/etc/NetworkManager/system-connections/</span>（权限 0600）。
-              如果这份 profile 会推到公开仓库，请改用有线网络或在首次开机时配置。
+              明文写进镜像里的 <span className="mono">/etc/NetworkManager/system-connections/</span>（权限 0600）。
+              这份 profile 推到公开仓库前记得删掉。
             </Note>
           </div>
         ) : (
           <div className="body">
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-              不加 Wi-Fi 配置，开机后由用户自行连接。
+              不加 Wi-Fi，开机后自行连接。
             </p>
           </div>
         )}
@@ -305,7 +305,7 @@ export function SystemStep({ profile, patch }: StepProps) {
             </Field>
           )}
           <p className="desc">
-            通过离线创建 <span className="mono">multi-user.target.wants</span> 符号链接实现，不需要在构建机里跑 systemd。
+            离线创建 <span className="mono">multi-user.target.wants</span> 符号链接，不用在构建机里跑 systemd。
           </p>
         </div>
       </Card>

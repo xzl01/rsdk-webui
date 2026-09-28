@@ -11,7 +11,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { ProfileSchema, requiredKernelPackages, socList, sectorList } from '@rsdk-webui/shared'
 import { config } from './config.ts'
-import { engineRun } from './env.ts'
+import { detectEngine, engineRun } from './env.ts'
 import { ensureBuildTree } from './rsdkTree.ts'
 import { writeBundle } from './bundle.ts'
 import { indexKey, sourcesFor } from './packages.ts'
@@ -33,7 +33,7 @@ test('writeBundle produces a bundle whose jsonnet still parses', { skip }, async
     target: { product: 'radxa-e25', suite: 'bookworm', edition: 'cli' },
     packages: { install: ['nano'], purge: [] },
     system: { hostname: 'e25', user: { name: 'radxa', sshKeys: ['ssh-ed25519 AAAA t@h'] } },
-    backend: { kind: 'local-docker' },
+    backend: { kind: 'local-docker', image: config.image, engine: (await detectEngine())?.kind ?? 'podman' },
   })
 
   try {

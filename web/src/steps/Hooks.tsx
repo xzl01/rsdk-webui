@@ -89,8 +89,8 @@ export function HooksStep({ profile, patch }: StepProps) {
         <div className="body">
           {profile.files.length === 0 && (
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
-              往 rootfs 里放自己的配置文件：systemd unit、udev 规则、内核模块参数、证书……
-              文本直接写内容或上传（自动识别），二进制（.dtbo、证书）上传后以 base64 存进 profile.json。
+              放 systemd unit、udev 规则、模块参数、证书等。
+              文本自动识别；二进制（.dtbo、证书）以 base64 存进 profile.json。
             </p>
           )}
           {profile.files.map((file) => (
@@ -154,8 +154,7 @@ export function HooksStep({ profile, patch }: StepProps) {
         <div className="body">
           {profile.hooks.pre.length === 0 && (
             <p className="faint" style={{ margin: 0 }}>
-              还没有自定义脚本。这里的脚本会在所有“附加软件包 / 覆盖文件 / 用户配置”之后、上游的
-              update-initramfs 与 u-boot-update 之前执行。
+              还没有脚本。执行顺序：装包 → 覆盖文件 → 用户配置 → 这里 → update-initramfs。
             </p>
           )}
           {profile.hooks.pre.map((hook, index) => (
@@ -181,7 +180,7 @@ export function HooksStep({ profile, patch }: StepProps) {
                   checked={hook.inRootfs}
                   onChange={(v) => updateHook(hook.id, { inRootfs: v })}
                   title="在新系统里执行 (chroot)"
-                  desc="关闭时脚本在构建容器里运行，可用 $ROOTFS 直接改文件；开启后脚本被拷进镜像再 chroot 执行。"
+                  desc="关：在容器里跑，用 $ROOTFS 改文件。开：拷进镜像再 chroot 执行"
                 />
                 <Toggle checked={hook.enabled} onChange={(v) => updateHook(hook.id, { enabled: v })} title="启用" />
                 <div style={{ flex: 'none' }}>
@@ -195,17 +194,8 @@ export function HooksStep({ profile, patch }: StepProps) {
         </div>
       </Card>
 
-      <Card title="执行时机" >
+      <Card title="执行时机" hint="定制插在 full-upgrade 之后、生成 initramfs 之前">
         <div className="body">
-          <p style={{ margin: 0, fontSize: 12.5 }} className="dim">
-            生成的 <span className="mono">customize/install.sh</span> 被插入到上游{' '}
-            <span className="mono">rootfs.jsonnet</span> 的 <span className="mono">+ cleanup()</span> 之后。上游
-            <span className="mono"> additional_repos.libjsonnet</span> 里的{' '}
-            <span className="mono">apt-get full-upgrade</span> / <span className="mono">autoremove --purge</span>{' '}
-            在更早的位置，所以这里装的包不会被自动清理掉；而 update-initramfs / u-boot-update 在更晚的位置，所以
-            内核模块、firmware、u-boot 相关的改动都会被正确收进 initramfs 和引导镜像。
-          </p>
-          <hr className="sep" />
           <div className="chips">
             <Chip>1. apt-get full-upgrade</Chip>
             <Chip tone="accent">2. 本页的定制 ← 我们</Chip>
@@ -213,6 +203,18 @@ export function HooksStep({ profile, patch }: StepProps) {
             <Chip>4. u-boot-update</Chip>
             <Chip>5. 生成磁盘镜像</Chip>
           </div>
+          <details className="help-details">
+            <summary>为什么插在 2 这个位置</summary>
+            <p>
+              生成的 <span className="mono">customize/install.sh</span> 追加在上游{' '}
+              <span className="mono">rootfs.jsonnet</span> 的 <span className="mono">+ cleanup()</span> 之后。
+              上游 <span className="mono">additional_repos.libjsonnet</span> 里的{' '}
+              <span className="mono">apt-get full-upgrade</span> /{' '}
+              <span className="mono">autoremove --purge</span> 更早，所以这里装的包不会被自动清理掉；
+              update-initramfs / u-boot-update 更晚，所以内核模块、firmware、u-boot 的改动能正确收进
+              initramfs 和引导镜像。
+            </p>
+          </details>
         </div>
       </Card>
 
