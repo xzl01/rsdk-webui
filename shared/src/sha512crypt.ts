@@ -67,7 +67,9 @@ export type Sha512CryptOptions = {
 }
 
 export async function sha512crypt(password: string, options: Sha512CryptOptions = {}): Promise<string> {
-  const rounds = options.rounds ?? ROUNDS_DEFAULT
+  // glibc 只接受 [1000, 999999999]：低于下限时 glibc 会静默回退到 5000，
+  // 生成的哈希就会跟这里声明的不一致；超大值则让构建容器挂死
+  const rounds = Math.min(999_999_999, Math.max(1000, options.rounds ?? ROUNDS_DEFAULT))
   const salt = (options.salt ?? randomSalt()).slice(0, 16)
   const pw = encoder.encode(password)
   const sa = encoder.encode(salt)

@@ -145,7 +145,8 @@ if [[ $WITH_INDEX == 1 ]]; then
   mkdir -p "$OUT/pkgindex"
   log "导出包索引: ${suites//,/ }"
   for suite in ${suites//,/ }; do
-    python3 "$ROOT/ops/pkgindex.py" --suite "$suite" --catalog "$OUT/catalog.json" --out "$OUT/pkgindex/$suite.json.gz"
+    python3 "$ROOT/ops/pkgindex.py" --suite "$suite" --catalog "$OUT/catalog.json" --out "$OUT/pkgindex/$suite.json.gz" \
+      || die "suite $suite 的包索引生成失败（多半是软件源抓取失败），不要带着空索引部署"
   done
 else
   log "跳过包索引（加 --with-index 生成）"

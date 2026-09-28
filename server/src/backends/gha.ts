@@ -58,10 +58,35 @@ function explainGitFailure(stderr: string): string {
   return `推送失败: ${stderr}`
 }
 
+/**
+ * git 认证：token 写进一个 0700 的临时 GIT_ASKPASS 脚本，用完即删。
+ * 之前用 `-c credential.helper=...password=<token>`，token 作为 argv 元素
+ * 对同机所有能读 ps 的进程可见；askpass 让它只存在于文件系统的一小段时间。
+ */
+function askpassScript(token: string): string {
+  const safe = token.replaceAll("'", `'\\''`)
+  return [
+    '#!/bin/sh',
+    'case "$1" in',
+    '  *Username*) echo x-access-token ;;',
+    `  *) printf '%s\\n' '${safe}' ;;`,
+    'esac',
+    '',
+  ].join('\n')
+}
+
 async function git(args: string[], cwd: string, token: string) {
-  // keep the token out of argv
-  const helper = `!f() { echo username=x-access-token; echo "password=${token}"; }; f`
-  return tryRun(which('git')!, ['-c', `credential.helper=${helper}`, ...args], { cwd })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rsdk-webui-askpass-'))
+  const script = path.join(dir, 'askpass.sh')
+  fs.writeFileSync(script, askpassScript(token), { mode: 0o700 })
+  try {
+    return await tryRun(which('git')!, args, {
+      cwd,
+      env: { GIT_ASKPASS: script, GIT_TERMINAL_PROMPT: '0' },
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 function appendLog(jobId: string, text: string): void {

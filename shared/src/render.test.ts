@@ -178,7 +178,11 @@ test('the generated install script is valid bash and covers every feature', () =
     }
 
     // blast-radius check: no unquoted expansion of user data
-    assert.ok(!script.includes('My WiFi') || script.includes('My WiFi"'), 'wifi SSID must be quoted')
+    // (v3: step 行统一走 shq 单引号，SSID 不再出现在双引号字符串里)
+    assert.ok(
+      script.includes("step '配置 WiFi: My WiFi'"),
+      'wifi step line must be single-quoted (shq), not embedded in double quotes',
+    )
 
     const byId = new Map(blobs.map((b) => [b.path, b.content]))
     assert.ok(byId.has('customize/blobs/overlay-00-motd'))
@@ -190,7 +194,7 @@ test('the generated install script is valid bash and covers every feature', () =
     assert.ok(byId.has('customize/blobs/nm-my-wifi.nmconnection'))
     assert.equal(byId.get('customize/blobs/authorized_keys-radxa'), 'ssh-ed25519 AAAA test@host\n')
     assert.equal(byId.get('customize/blobs/authorized_keys-root'), 'ssh-rsa BBBB root@host\n')
-    assert.match(String(byId.get('customize/blobs/nm-my-wifi.nmconnection')), /psk=p@ss word/)
+    assert.match(String(byId.get('customize/blobs/nm-my-wifi.nmconnection')), /psk="p@ss word"/)
     assert.match(String(byId.get('customize/blobs/sshd_config.d.conf')), /PasswordAuthentication no/)
     assert.match(String(byId.get('customize/blobs/sudoers-radxa')), /NOPASSWD:ALL/)
   } finally {

@@ -39,17 +39,29 @@ const packageName = pattern(
   '软件包名不合法（可带 :架构 或 /suite 后缀）',
 )
 
+/** 拒绝控制字符（含换行）：这些字段会被写进生成的 shell 注释、echo 行与 job 标题，
+ *  一个换行就能把注释断成可执行代码。shell 元字符由 render 侧统一转义兜底。 */
+const CONTROL_RE = /[\x00-\x1f\x7f]/
+const CONTROL_MSG = '不能包含换行等控制字符'
+
+/** 分支/id 这类要进文件名、git ref、bundle 路径的短标识符 */
+const identifier = (message: string) => z.string().regex(/^[0-9a-z][0-9a-z-]{0,63}$/, message)
+
 
 // ---------------------------------------------------------------------------
 // apt / repos
 // ---------------------------------------------------------------------------
 
 export const ExtraAptRepoSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1),
+  /** 会变成 customize/apt/<id>.list 等文件名，必须是路径安全的标识符 */
+  id: identifier('id 只能用小写字母、数字和连字符'),
+  name: z.string().min(1).max(80).refine((v) => !CONTROL_RE.test(v), CONTROL_MSG),
   /** base URL, e.g. https://deb.debian.org/debian */
   url: z.string().min(1).refine((v) => /^https?:\/\/\S+$/.test(v), '仓库地址应为 http(s) URL'),
-  suite: z.string().min(1).refine((v) => /^\S+$/.test(v), 'suite 不能含空白字符'),
+  suite: z
+    .string()
+    .min(1)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'suite 只能包含字母、数字和 . _ -'),
   components: z.array(z.string().regex(/^[A-Za-z0-9-]+$/, '组件名不合法')).min(1).default(['main']),
   /** ASCII-armored key content, stored in the bundle. */
   keyArmored: z.string().default(''),
@@ -107,7 +119,10 @@ export const PackagesSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const UserSpecSchema = z.object({
-  name: z.string().min(1),
+  /** useradd/chpasswd/home 目录都会用到；Debian adduser 默认也只接受这种形状 */
+  name: z
+    .string()
+    .regex(/^[a-z_][a-z0-9_-]{0,31}$/, '用户名需以小写字母或 _ 开头，只能含小写字母、数字、_ 和 -（最长 32 字符）'),
   /** crypt(3) sha512 hash. The plaintext password never leaves the browser session. */
   passwordHash: z.string().default(''),
   /** create the account, add to sudo */
@@ -129,10 +144,11 @@ export const SshSchema = z.object({
 })
 
 export const WifiSchema = z.object({
-  ssid: z.string().min(1),
-  psk: z.string().default(''),
+  ssid: z.string().min(1).max(32).refine((v) => !CONTROL_RE.test(v), CONTROL_MSG),
+  /** 空 = 开放网络；WPA 密码 8..63 字符（64 位 hex PSK 也放行） */
+  psk: z.string().max(64).refine((v) => !CONTROL_RE.test(v), CONTROL_MSG).default(''),
   hidden: z.boolean().default(false),
-  country: z.string().default(''),
+  country: pattern(/^[A-Za-z]{2}$/, '国家代码应为两位字母，如 CN'),
   autoconnect: z.boolean().default(true),
 })
 
@@ -160,9 +176,13 @@ export const SystemSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const OverlayFileSchema = z.object({
-  id: z.string(),
-  /** absolute path inside the target rootfs */
-  path: z.string().min(1).refine((v) => v.startsWith('/'), '目标路径必须是绝对路径'),
+  id: identifier('id 只能用小写字母、数字和连字符'),
+  /** absolute path inside the target rootfs；会被插进生成的 install 命令行 */
+  path: z
+    .string()
+    .min(1)
+    .refine((v) => v.startsWith('/'), '目标路径必须是绝对路径')
+    .refine((v) => !/[\x00-\x1f$`"\\]/.test(v), '路径不能包含引号、$、反引号、反斜杠或控制字符'),
   mode: fileMode,
   owner: fileOwner,
   /** inline content; see `encoding` */
@@ -175,8 +195,8 @@ export const OverlayFileSchema = z.object({
 })
 
 export const HookSchema = z.object({
-  id: z.string(),
-  name: z.string().default('hook'),
+  id: identifier('id 只能用小写字母、数字和连字符'),
+  name: z.string().max(80).refine((v) => !CONTROL_RE.test(v), CONTROL_MSG).default('hook'),
   script: z.string().default(''),
   enabled: z.boolean().default(true),
   /** run inside the new rootfs with chroot instead of on the build host */
@@ -192,9 +212,10 @@ export const HooksSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const TargetSchema = z.object({
-  product: z.string().min(1),
-  suite: z.string().min(1),
-  edition: z.string().min(1),
+  /** 三个值都来自目录选择，但 profile 会被导入/分享，这里仍按 rsdk 标识符校验 */
+  product: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, 'product 只能包含字母、数字和 . _ + -'),
+  suite: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, 'suite 只能包含字母、数字和 . _ + -'),
+  edition: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, 'edition 只能包含字母、数字和 . _ + -'),
   sectorSize: z.union([z.literal(512), z.literal(4096)]).default(512),
   imageName: z.string().default('output.img'),
   productOverride: z.string().default(''),
@@ -214,8 +235,11 @@ export const LocalBackendSchema = z.object({
 export const GhBackendSchema = z.object({
   kind: z.literal('gh-actions'),
   repo: z.string().default(''),
-  /** branch prefix the bundle is pushed to */
-  branchPrefix: z.string().default('build'),
+  /** branch prefix the bundle is pushed to（workflow 只监听 build/** 与 runs/**） */
+  branchPrefix: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, '分支前缀只能包含字母、数字和 . _ -')
+    .default('build'),
   /** upload the resulting image to a GitHub Release */
   publishRelease: z.boolean().default(false),
   /** xz-compress the image before uploading */
@@ -230,13 +254,14 @@ export const BackendSchema = z.discriminatedUnion('kind', [LocalBackendSchema, G
 // ---------------------------------------------------------------------------
 
 export const MetaSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(80).refine((v) => !CONTROL_RE.test(v), CONTROL_MSG),
   notes: z.string().default(''),
 })
 
 export const ProfileSchema = z.object({
   version: z.literal(1).default(1),
-  id: z.string(),
+  /** 会进 git 分支名、bundle 文件名与生成的注释，必须是路径/ref 安全的标识符 */
+  id: identifier('id 只能用小写字母、数字和连字符'),
   meta: MetaSchema,
   target: TargetSchema,
   repos: ReposSchema.default({}),

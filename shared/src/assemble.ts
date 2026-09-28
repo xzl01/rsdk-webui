@@ -10,7 +10,7 @@
  * tree always matches the image the build will run in.
  */
 import { patchRootfsJsonnet, renderBundle, type BundleFile } from './render.ts'
-import type { Profile } from './schema.ts'
+import { ProfileSchema, type Profile } from './schema.ts'
 
 export type BundleEntry = {
   path: string
@@ -40,13 +40,17 @@ function toBase64(bytes: Uint8Array): string {
  * @param tree the image's /usr/share/rsdk/build, as {relative path: content}
  */
 export function assembleBundle(profile: Profile, tree: Record<string, string>): BundleEntry[] {
+  // 单一入口兜底：服务端路由在校验后进来，但静态模式（浏览器 startBuild）的
+  // profile 直接来自表单 state / localStorage，这里不过一遍 schema 就可能把
+  // 未校验的值渲染进构建脚本
+  const p = ProfileSchema.parse(profile)
   const entries: BundleEntry[] = []
 
   // 1. the jsonnet tree, with our hook spliced into rootfs.jsonnet
   let patchedRootfs: string | null = null
   for (const [rel, content] of Object.entries(tree)) {
     if (rel === 'rootfs.jsonnet') {
-      patchedRootfs = patchRootfsJsonnet(content, profile)
+      patchedRootfs = patchRootfsJsonnet(content, p)
       continue
     }
     entries.push({ path: `rsdk-build/${rel}`, content, encoding: 'utf-8', mode: 0o644 })
@@ -57,7 +61,7 @@ export function assembleBundle(profile: Profile, tree: Record<string, string>): 
   entries.push({ path: 'rsdk-build/rootfs.jsonnet', content: patchedRootfs, encoding: 'utf-8', mode: 0o644 })
 
   // 2. everything we generate
-  const files: BundleFile[] = renderBundle(profile)
+  const files: BundleFile[] = renderBundle(p)
   for (const file of files) {
     if (isIgnoredBundlePath(file.path)) continue
     entries.push(

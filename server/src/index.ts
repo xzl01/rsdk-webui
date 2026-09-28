@@ -135,7 +135,15 @@ export async function buildServer() {
     return { engine, image, tree, gh }
   })
 
-  app.post('/api/setup/fetch-image', async () => {
+  app.post('/api/setup/fetch-image', async (request, reply) => {
+    // 镜像导入（podman load）与构建（podman run）同样争抢存储锁：构建进行中
+    // 就不要开始导入，免得两边一起报"镜像消失"
+    const busy = listJobs().find(
+      (j) => j.backend === 'local-docker' && (j.status === 'running' || j.status === 'queued'),
+    )
+    if (busy) {
+      return reply.code(409).send({ error: `本地构建 ${busy.id} 进行中，导入镜像会争抢容器存储锁，请等它结束`, jobId: busy.id })
+    }
     const job = await startFetchImage()
     return { jobId: job.id }
   })
@@ -290,6 +298,24 @@ export async function buildServer() {
       return reply.code(409).send({ error: `该方案已有构建在进行中 (${running.id})`, jobId: running.id })
     }
 
+    // local builds run `podman run` for the better part of an hour, outside the
+    // serialized() queue that protects the short engine calls - two of them in
+    // parallel contend on podman's storage lock and fail with "the image
+    // disappeared". Only one local-engine job may run at a time; GitHub Actions
+    // builds are independent repos/branches and are not affected.
+    if (p.backend.kind === 'local-docker') {
+      const busy = listJobs().find(
+        (j) => (j.backend === 'local-docker' || j.kind === 'fetch-image') && (j.status === 'running' || j.status === 'queued'),
+      )
+      if (busy) {
+        const what = busy.kind === 'fetch-image' ? '镜像导入' : `构建 ${busy.id}`
+        return reply.code(409).send({
+          error: `已有本地容器任务在进行中（${what}）—— podman 存储锁互斥，等它结束再开始新的构建`,
+          jobId: busy.id,
+        })
+      }
+    }
+
     if (body.dryRun) {
       const tree = await ensureBuildTree()
       return { dryRun: true, files: previewBundle(p), buildTree: tree }
@@ -395,8 +421,15 @@ export async function buildServer() {
     if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
       return reply.code(404).send({ error: 'not found' })
     }
-    reply.header('Content-Disposition', `attachment; filename="${path.basename(target)}"`)
-    return reply.send(fs.createReadStream(target))
+    // 词法检查不解析符号链接：构建产物目录里可能有指向宿主任意文件的链接
+    // （自定义脚本/overlay 造的）。realpath 之后再确认一次才允许读。
+    const realRoot = fs.realpathSync(root)
+    const realTarget = fs.realpathSync(target)
+    if (realTarget !== realRoot && path.relative(realRoot, realTarget).startsWith('..')) {
+      return reply.code(400).send({ error: 'invalid path' })
+    }
+    reply.header('Content-Disposition', `attachment; filename="${path.basename(target).replace(/["\\\r\n]/g, '_')}"`)
+    return reply.send(fs.createReadStream(realTarget))
   })
 
   // -------------------------------------------------------------------------
@@ -444,7 +477,9 @@ export async function buildServer() {
     if (!suite) return { meta: null, hits: [] }
     const p = product ? await findProduct(product).catch(() => undefined) : undefined
     const key = indexKey(suite, socList(p))
-    return { key, ...searchPackages(key, q ?? '', Number(limit ?? 60)) }
+    // 封顶：limit=100000 不该把整份 64k 条目的索引一次吐回去
+    const capped = Math.min(500, Math.max(1, Number(limit ?? 60) || 60))
+    return { key, ...searchPackages(key, q ?? '', capped) }
   })
 
   // -------------------------------------------------------------------------
@@ -487,11 +522,24 @@ function stripHeavy<T extends { profile?: Profile; logPath?: string }>(job: T) {
 // ---------------------------------------------------------------------------
 
 if (process.env.RSDK_WEBUI_NO_LISTEN !== '1') {
+  // 这个 API 没有认证（profile 里可能存着 Wi-Fi PSK 与密码哈希），安全性完全
+  // 押在"只听回环"上。非回环绑定必须是显式决定，而不是一个 env 变顺手改的。
+  if (!['127.0.0.1', 'localhost', '::1'].includes(config.host) && process.env.RSDK_WEBUI_ALLOW_REMOTE !== '1') {
+    console.error(
+      `拒绝启动：RSDK_WEBUI_HOST=${config.host} 会把这个无认证的 API 暴露给网络\n` +
+        `（任何同网段主机都能读到 profile 内容、启动容器构建）。\n` +
+        `确实需要远程访问时，设置 RSDK_WEBUI_ALLOW_REMOTE=1 并自行承担风险。`,
+    )
+    process.exit(1)
+  }
   const app = await buildServer()
   try {
     await app.listen({ host: config.host, port: config.port })
     app.log.info(`rsdk-webui ready on http://${config.host}:${config.port}`)
     app.log.info(`data dir: ${config.dataDir}`)
+    if (!['127.0.0.1', 'localhost', '::1'].includes(config.host)) {
+      app.log.warn(`绑定在 ${config.host} 上，API 无认证 —— 已由 RSDK_WEBUI_ALLOW_REMOTE=1 确认`)
+    }
   } catch (err) {
     app.log.error(err)
     process.exit(1)

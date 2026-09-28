@@ -55,6 +55,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # setup.sh 把 .deb 缓存在数据目录里；不缓存的话每次部署都要重下 ~480MB
+      # 并重新解包出 ~2.2GB 的 image.tar
+      - name: Cache the rsdk container package
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/rsdk-webui/cache/rsdk-image_*.deb
+          key: rsdk-image-deb-0.1.0-1
+
       - name: Load the build container image
         run: ./ops/setup.sh
 

@@ -16,7 +16,6 @@
 // ---------------------------------------------------------------------------
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import { createRequire } from 'node:module'
 
 const args = process.argv.slice(2)
 const url = args.shift()

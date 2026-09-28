@@ -316,6 +316,10 @@ export async function prepareRepo(session: GhSession, isPrivate = true): Promise
       branch,
       [{ path: '.github/workflows/build.yml', content: workflowBody, encoding: 'utf-8', mode: 0o644 }],
       'chore: rsdk-webui build workflow',
+      undefined,
+      // 在默认分支现有树之上增量提交：仓库可能是用户的 fork 或复用的既有仓库，
+      // 整树替换会把分支顶端的其他文件全部抹掉
+      { inheritTree: true },
     )
     pushedWorkflow = true
     steps.push(`提交 workflow 到 ${branch}`)
@@ -423,13 +427,20 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
   return out
 }
 
-/** Create a commit on `branch` with exactly these files (creating the branch if needed). */
+/**
+ * Create a commit on `branch` with exactly these files (creating the branch if needed).
+ *
+ * By default the new tree contains *only* `files` (整树替换 —— build/<id> 分支
+ * 是自包含构建包，这是预期行为). Pass `opts.inheritTree` to build on top of the
+ * branch's existing tree instead (用于往默认分支增量提交单个文件).
+ */
 export async function commitFiles(
   session: GhSession,
   branch: string,
   files: FileSpec[],
   message: string,
   onProgress?: (done: number, total: number) => void,
+  opts: { inheritTree?: boolean } = {},
 ): Promise<{ commit: string; branch: string }> {
   const repo = session.repo
   const baseBranch = await request<{ default_branch?: string }>(session, `/repos/${repo}`).then(
@@ -448,6 +459,15 @@ export async function commitFiles(
     parent = head?.object.sha
   }
 
+  // inheritTree: 以分支当前树为 base_tree，把 files 合并进去而不是替换整棵树
+  let baseTree: string | undefined
+  if (opts.inheritTree && parent) {
+    const parentCommit = await request<{ tree: { sha: string } }>(session, `/repos/${repo}/git/commits/${parent}`).catch(
+      () => null,
+    )
+    baseTree = parentCommit?.tree.sha
+  }
+
   let done = 0
   const blobs = await mapLimit(files, 6, async (file) => {
     const blob = await request<{ sha: string }>(session, `/repos/${repo}/git/blobs`, {
@@ -460,7 +480,7 @@ export async function commitFiles(
 
   const tree = await request<{ sha: string }>(session, `/repos/${repo}/git/trees`, {
     method: 'POST',
-    body: JSON.stringify({ tree: blobs }),
+    body: JSON.stringify(baseTree ? { tree: blobs, base_tree: baseTree } : { tree: blobs }),
   })
 
   const commit = await request<{ sha: string }>(session, `/repos/${repo}/git/commits`, {
@@ -471,7 +491,9 @@ export async function commitFiles(
   try {
     await request(session, `/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ sha: commit.sha, force: true }),
+      // inheritTree 的父提交就是当前 head，本就是 fast-forward；不 force，
+      // 万一并发有人推了新提交，这里会失败而不是悄悄覆盖别人的东西
+      body: JSON.stringify({ sha: commit.sha, force: !opts.inheritTree }),
     })
   } catch {
     await request(session, `/repos/${repo}/git/refs`, {
@@ -535,10 +557,23 @@ export class GitHubAdapter {
 
   async startBuild(profile: Profile, onProgress?: (text: string) => void): Promise<Job> {
     const tree = await loadRsdkTree()
-    const entries = assembleBundle(profile, tree).filter((e) => !isIgnoredBundlePath(e.path))
+    let entries
+    try {
+      entries = assembleBundle(profile, tree).filter((e) => !isIgnoredBundlePath(e.path))
+    } catch (err) {
+      // assembleBundle 会先过一遍 zod —— 把校验失败翻成可读的中文
+      const issues = (err as { issues?: Array<{ path?: (string | number)[]; message: string }> })?.issues
+      if (Array.isArray(issues)) {
+        const detail = issues.map((i) => `${(i.path ?? []).join('.')} ${i.message}`).join('；')
+        throw new Error(`方案数据不合法：${detail}`)
+      }
+      throw err
+    }
     onProgress?.(`组装构建包：${entries.length} 个文件（含 rsdk jsonnet 树）`)
 
-    const branch = `build/${profile.id}`
+    const gh = profile.backend.kind === 'gh-actions' ? profile.backend : null
+    const prefix = (gh?.branchPrefix || 'build').replace(/^\/+|\/+$/g, '') || 'build'
+    const branch = `${prefix}/${profile.id}`
     const { commit } = await commitFiles(
       this.session,
       branch,
@@ -553,12 +588,11 @@ export class GitHubAdapter {
       await sleep(3000)
       const runs = await request<{ workflow_runs: Run[] }>(
         this.session,
-        `/repos/${this.session.repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=1`,
+        `/repos/${this.session.repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=5`,
       )
-      if (runs.workflow_runs[0]) {
-        run = runs.workflow_runs[0]
-        break
-      }
+      // 不要依赖列表的默认排序假设：显式按 created_at 挑最新的一条
+      run = [...runs.workflow_runs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      if (run) break
     }
     if (!run) {
       const status = await repoStatus(this.session)

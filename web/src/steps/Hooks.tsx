@@ -26,6 +26,27 @@ function newHook(): Hook {
   }
 }
 
+/** base64 without Buffer (browser-safe), for binary uploads */
+function toBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+/** 能按 UTF-8 解码且没有 NUL/控制字符的文件按文本保存，保持可编辑 */
+function decodeAsText(bytes: Uint8Array): string | null {
+  if (bytes.includes(0)) return null
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return /[\u0001-\u0008\u000b\u000c\u000e-\u001f]/.test(text) ? null : text
+  } catch {
+    return null
+  }
+}
+
 export function HooksStep({ profile, patch }: StepProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const pendingFileId = useRef<string | null>(null)
@@ -39,15 +60,19 @@ export function HooksStep({ profile, patch }: StepProps) {
     setHooks(profile.hooks.pre.map((h) => (h.id === id ? { ...h, ...p } : h)))
 
   const onPickFile = (file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result as string
-      const base64 = result.split(',')[1] ?? ''
+    void file.arrayBuffer().then((buffer) => {
       const id = pendingFileId.current
-      if (id) updateFile(id, { content: base64, encoding: 'base64' })
       pendingFileId.current = null
-    }
-    reader.readAsDataURL(file)
+      if (!id) return
+      const bytes = new Uint8Array(buffer)
+      const text = decodeAsText(bytes)
+      updateFile(
+        id,
+        text !== null
+          ? { content: text, encoding: 'utf8', blob: '' }
+          : { content: toBase64(bytes), encoding: 'base64', blob: '' },
+      )
+    })
   }
 
   return (
@@ -65,7 +90,7 @@ export function HooksStep({ profile, patch }: StepProps) {
           {profile.files.length === 0 && (
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
               往 rootfs 里放自己的配置文件：systemd unit、udev 规则、内核模块参数、证书……
-              文本直接写内容，二进制（.dtbo、证书）可以上传，内容会以 base64 存进 profile.json。
+              文本直接写内容或上传（自动识别），二进制（.dtbo、证书）上传后以 base64 存进 profile.json。
             </p>
           )}
           {profile.files.map((file) => (
@@ -103,7 +128,7 @@ export function HooksStep({ profile, patch }: StepProps) {
                       fileInput.current?.click()
                     }}
                   >
-                    上传二进制
+                    上传文件
                   </Button>
                 </div>
                 <div style={{ flex: 'none' }}>

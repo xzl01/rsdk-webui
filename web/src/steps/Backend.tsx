@@ -84,7 +84,7 @@ export function BackendStep({ profile, patch, env, mode }: StepProps) {
               <hr className="sep" />
               <Field
                 label="分支前缀"
-                desc="每个方案一个分支。workflow 只监听 build/** 与 runs/**，所以这里只能二选一 —— 随便填会让推送成功但永远等不到 run。"
+                desc="每个方案一个分支。构建包会推到 <前缀>/<方案id>，workflow 只监听 build/** 与 runs/**，所以这里只能二选一。"
               >
                 <Select
                   value={gh.branchPrefix === 'runs' ? 'runs' : 'build'}

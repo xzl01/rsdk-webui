@@ -131,12 +131,24 @@ def main() -> int:
 
     print(f"   {args.suite}: {len(socs)} 个 SoC 仓库")
     packages: dict[str, dict] = {}
+    distro_ok = False
     for label, url, is_radxa, is_test in sources(args.suite, socs):
         raw = fetch(url)
         if raw is None:
             continue
+        if not is_radxa:
+            distro_ok = True
         added = parse(decompress(raw, url), is_radxa, is_test, packages)
         print(f"   {label}: +{added}")
+
+    # 一个空索引部署出去，UI 搜索和 check-boards 的体检会全错且毫无报错 ——
+    # 发行版基础源（或全部源）抓取失败时宁可直接失败，也不要写空文件
+    if not distro_ok:
+        print(f"   !! {args.suite}: 发行版软件源全部抓取失败，拒绝生成空索引", file=sys.stderr)
+        return 1
+    if not packages:
+        print(f"   !! {args.suite}: 没有解析到任何软件包", file=sys.stderr)
+        return 1
 
     ordered = [packages[name] for name in sorted(packages)]
     payload = json.dumps(ordered, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

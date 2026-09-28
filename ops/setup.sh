@@ -59,6 +59,15 @@ CACHE="$DATA/cache"
 DEB="rsdk-image_${VERSION}_amd64.deb"
 cd "$CACHE"
 
+# 下载 (~480MB) + 解包 (~2.2GB image.tar) + 导入 (~3GB) 都吃磁盘；写满才知道
+# 不够就太晚了，而且半截产物会让后续判断（! -s image.tar）变得含糊
+if [[ $FORCE == 1 || ! -s $DEB || ! -s image.tar ]]; then
+  avail_kb="$(df -Pk "$DATA" | awk 'NR==2 {print $4}')"
+  if [[ -n $avail_kb ]] && (( avail_kb < 8 * 1024 * 1024 )); then
+    die "磁盘空间不足：$DATA 所在卷可用约 $(( avail_kb / 1024 / 1024 )) GiB，下载+解包+导入需要 ~8 GiB，请先清理"
+  fi
+fi
+
 if [[ $FORCE == 1 || ! -s $DEB ]]; then
   log "downloading $DEB (~480 MB)"
   curl -fL --retry 3 --retry-delay 2 -o "$DEB.part" \

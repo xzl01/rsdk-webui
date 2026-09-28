@@ -209,7 +209,8 @@ class StaticBackend implements Backend {
       .then((r) => (r.ok ? r.json() : { workflow_runs: [] }))
       .catch(() => ({ workflow_runs: [] }))
     return (runs.workflow_runs as Array<{ id: number; head_branch: string; status: string; conclusion: string | null; created_at: string; html_url: string }>)
-      .filter((run) => run.head_branch.startsWith('build/'))
+      // 构建分支前缀可选 build/ 或 runs/（BackendStep 里二选一）
+      .filter((run) => /^(build|runs)\//.test(run.head_branch))
       .map((run) => ({
         id: String(run.id),
         kind: 'build' as const,
@@ -221,7 +222,7 @@ class StaticBackend implements Backend {
                 ? ('cancelled' as const)
                 : ('failed' as const)
             : ('running' as const),
-        title: run.head_branch.replace(/^build\//, ''),
+        title: run.head_branch.replace(/^(build|runs)\//, ''),
         backend: 'gh-actions' as const,
         createdAt: new Date(run.created_at).getTime(),
         steps: [],

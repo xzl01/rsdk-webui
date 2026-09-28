@@ -120,6 +120,11 @@ docs/       DESIGN.md
 
 ## Troubleshooting
 
+**Server exits with `拒绝启动`** — you set `RSDK_WEBUI_HOST` to a non-loopback
+address. The API has no authentication (profiles may contain a Wi-Fi PSK), so it
+refuses to bind to the network unless you explicitly set
+`RSDK_WEBUI_ALLOW_REMOTE=1`, accepting the risk.
+
 **`podman` fails with `kernel does not support overlay fs`** — the graph root is
 on btrfs. `ops/setup.sh` and the server both detect this and switch to an
 isolated storage root at `~/.local/share/rsdk-webui/podman-root` with the btrfs

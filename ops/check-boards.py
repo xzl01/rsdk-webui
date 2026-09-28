@@ -38,12 +38,14 @@ BUNDLE_MOUNT = "/rsdk-bundle"
 
 
 def load_index(suite: str) -> dict[str, dict] | None:
-    """the shipped index for a suite, or None when it was not deployed"""
+    """the shipped index for a suite, or None when it was not deployed/empty"""
     path = INDEX / f"{suite}.json.gz"
     if not path.exists():
         return None
     with gzip.open(path, "rt", encoding="utf-8") as handle:
-        return {record["n"]: record for record in json.load(handle)}
+        records = json.load(handle)
+    # 空索引按"没有索引"处理：当作数据去判缺包会把所有组合误判成 broken
+    return {record["n"]: record for record in records} if records else None
 
 
 # --- packages qualified with a suite (e.g. libegl-mesa0/bookworm-backports) ---
@@ -70,10 +72,21 @@ def is_ubuntu(suite: str) -> bool:
 # bullseye still resolvable even though the suite is gone from the mirrors.
 ARCHIVE = "https://archive.debian.org/debian"
 
+# 实时抓取（updates/security/backports/PPA）失败 → 这个 suite 的"缺包"结论
+# 可能是网络抖动造出来的假阴性。记录下来，相关组合的 verdict 降级为 unknown。
+NET_BAD_QUALIFIED: set[str] = set()
+NET_BAD_PPA: set[tuple[str, str]] = set()
+# curl 的纯网络错误码：解析失败/连不上/超时/TLS/接收中断 —— 与 HTTP 404 区分开
+NET_RC = {6, 7, 28, 35, 47, 56}
+
+
+def curl_head(url: str) -> int:
+    probe = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "60", "-I", url], capture_output=True)
+    return probe.returncode
+
 
 def release_exists(url: str) -> bool:
-    probe = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "60", "-I", url], capture_output=True)
-    return probe.returncode == 0
+    return curl_head(url) == 0
 
 
 def distro_component_url(suite: str, component: str) -> str | None:
@@ -95,8 +108,12 @@ def distro_component_url(suite: str, component: str) -> str | None:
             base = "https://deb.debian.org/debian"
             candidates = [f"{base}/dists/{suite}/{component}/binary-arm64/Packages.xz"]
     for url in candidates:
-        if release_exists(url):
+        rc = curl_head(url)
+        if rc == 0:
             return url
+        if rc in NET_RC:
+            # 探测本身因为网络问题失败 —— 这个 suite 的数据不全，不是"不存在"
+            NET_BAD_QUALIFIED.add(suite)
     return None
 
 
@@ -152,6 +169,7 @@ def ppa_index(ppa: str, suite: str) -> set[str]:
                 names.add(line[9:].strip())
     else:
         print(f"   ! PPA 取不到: {ppa} ({suite})", file=sys.stderr)
+        NET_BAD_PPA.add(key)
     tmp.unlink(missing_ok=True)
     PPA_CACHE[key] = names
     return names
@@ -199,7 +217,6 @@ def required_essential(product: dict, boot: str, suite: str) -> list[str]:
         f"{boot}-{name}",
         f"linux-image-{name}",
         f"linux-headers-{name}",
-        f"{boot}-{name}",
     ]
 
 
@@ -397,12 +414,13 @@ def main() -> int:
                 key = (name, suite, edition)
                 rendered_list = rendered.get(key)
                 essential = required_essential(product, boot, suite)
+                ppas = product_ppas(product, socs, suite)
 
                 problems: list[str] = []
                 warnings: list[str] = []
 
                 ppa_names: set[str] = set()
-                for ppa in product_ppas(product, socs, suite):
+                for ppa in ppas:
                     ppa_names |= ppa_index(ppa, suite)
 
                 if index is None:
@@ -462,6 +480,9 @@ def main() -> int:
                         "packages": len(rendered_list) if isinstance(rendered_list, list) else 0,
                         "problems": problems,
                         "warnings": warnings,
+                        # 有问题时若恰逢网络数据不全，verdict 会标 unknown 而非 broken
+                        "netDegraded": bool(problems)
+                        and (suite in NET_BAD_QUALIFIED or any((ppa, suite) in NET_BAD_PPA for ppa in ppas)),
                     }
                 )
 
@@ -503,11 +524,18 @@ def main() -> int:
         for r in results:
             key = f"{r['product']}|{r['suite']}|{r['edition']}"
             if r["problems"]:
-                combos_out[key] = {
-                    "status": "broken",
-                    "missing": r["problems"],
-                    "hint": _hint_for(r),
-                }
+                if r.get("netDegraded"):
+                    combos_out[key] = {
+                        "status": "unknown",
+                        "missing": r["problems"],
+                        "hint": "部署体检时软件源/PPA 抓取失败，数据不全 —— 这个结论可能是网络抖动造成的误报，可以直接尝试构建。",
+                    }
+                else:
+                    combos_out[key] = {
+                        "status": "broken",
+                        "missing": r["problems"],
+                        "hint": _hint_for(r),
+                    }
             elif r["warnings"]:
                 combos_out[key] = {"status": "test", "missing": r["warnings"], "hint": _hint_for(r)}
             else:
@@ -521,7 +549,11 @@ def main() -> int:
         pathlib.Path(args.verdicts).write_text(json.dumps(payload, ensure_ascii=False, indent=1))
         broken = sum(1 for v in combos_out.values() if v["status"] == "broken")
         test = sum(1 for v in combos_out.values() if v["status"] == "test")
-        print(f"\n体检表写入 {args.verdicts}：{len(combos_out) - broken - test} 可构建 / {test} 需 test 源 / {broken} 会失败")
+        unknown = sum(1 for v in combos_out.values() if v["status"] == "unknown")
+        print(
+            f"\n体检表写入 {args.verdicts}：{len(combos_out) - broken - test - unknown} 可构建 / "
+            f"{test} 需 test 源 / {broken} 会失败 / {unknown} 数据不全（unknown）"
+        )
 
     if args.json:
         pathlib.Path(args.json).write_text(json.dumps(results, ensure_ascii=False, indent=2))

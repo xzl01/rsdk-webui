@@ -22,6 +22,15 @@ import { cancelGhaRun, runGhaBuild, watchRun } from './backends/gha.ts'
 const processes = new Map<string, ChildProcess>()
 const watchers = new Map<string, NodeJS.Timeout>()
 
+/**
+ * adopt 一个「日志最近还有动静」的 job 时允许的静默窗口。qemu-user 下的大构建
+ * 可能连续几分钟甚至更久不写一行日志（解包、编译静默阶段），90 秒的窗口会把
+ * 还活着的构建误判成已中断 —— 容器变孤儿，rootfs 缓存被后续构建污染。
+ */
+const ADOPT_FRESH_MS = 30 * 60_000
+/** watcher 侧：日志停止增长且进程句柄已消失多久后判定任务死亡 */
+const STALL_MS = 45 * 60_000
+
 // ---------------------------------------------------------------------------
 // log parsing -> timeline
 // ---------------------------------------------------------------------------
@@ -81,6 +90,8 @@ function watchJob(jobId: string): void {
   const exitFile = exitCodeFile(dir)
   let offset = 0
   let steps: JobStep[] = []
+  let lastSize = 0
+  let lastGrowth = Date.now()
 
   const finish = (code: number) => {
     const current = getJob(jobId)
@@ -107,6 +118,26 @@ function watchJob(jobId: string): void {
         steps = [...steps, ...next]
         updateJob(jobId, { steps })
       }
+    }
+
+    // 停滞检测：exit-code 文件迟迟不出现、进程句柄没了（被 kill 或重启后
+    // 未能接管）、日志也不再增长 —— 与其永远挂在 running，不如明确判死
+    if (fs.existsSync(current.logPath)) {
+      const size = fs.statSync(current.logPath).size
+      if (size > lastSize) {
+        lastSize = size
+        lastGrowth = Date.now()
+      }
+    }
+    if (!processes.has(jobId) && Date.now() - lastGrowth > STALL_MS) {
+      stop()
+      updateJob(jobId, {
+        status: 'failed',
+        finishedAt: Date.now(),
+        error: `日志超过 ${STALL_MS / 60_000} 分钟没有增长且进程已不在，任务已中止；` +
+          '如果容器仍在后台（podman/docker ps 可见），请手动处理',
+      })
+      return
     }
 
     if (fs.existsSync(exitFile)) {
@@ -386,7 +417,7 @@ export async function reconcileJobsOnStartup(): Promise<{ adopted: number; orpha
 
     const container = dir ? `rsdk-webui-${path.basename(dir)}` : ''
     const alive = container !== '' && containers.has(container)
-    const fresh = fs.existsSync(job.logPath) && Date.now() - fs.statSync(job.logPath).mtimeMs < 90_000
+    const fresh = fs.existsSync(job.logPath) && Date.now() - fs.statSync(job.logPath).mtimeMs < ADOPT_FRESH_MS
 
     // GitHub Actions builds are tracked by a polling loop in this process, not
     // by a child process, so a restart re-attaches by run id instead
