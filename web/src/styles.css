@@ -513,7 +513,7 @@ code {
   margin: 0;
   font-size: var(--label);
   font-weight: 650;
-  text-transform: uppercase;
+  /* 标题可能是分支名或 job id，同样不能大写 */
   letter-spacing: 0.1em;
   color: var(--text-dim);
 }
@@ -541,7 +541,8 @@ code {
 .field > .field-label {
   font-size: var(--label);
   font-weight: 650;
-  text-transform: uppercase;
+  /* 不能大写：标签里带标识符（-k / -f / owner/name / suite），
+     大写会把 -k 显示成 -K —— 等于把参数名写错了 */
   letter-spacing: 0.09em;
   color: var(--text-dim);
 }
