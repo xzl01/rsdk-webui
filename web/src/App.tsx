@@ -418,7 +418,7 @@ export default function App() {
                   <h1>{STEPS[stepIndex]?.label}</h1>
                   <p>
                     {step === 'target' && '选一块板子，确认系统版本和扇区大小。'}
-                    {step === 'repos' && '选从哪取包。国内建议换 USTC 或清华镜像。'}
+                    {step === 'repos' && '选从哪取包。Radxa 源不是每个镜像站都有。'}
                     {step === 'packages' && '在预置套装之外，加装或移除软件包。'}
                     {step === 'system' && '设置主机名、时区、用户、SSH 和 Wi-Fi。'}
                     {step === 'hooks' && '放自己的文件，或加一段构建时脚本。'}

@@ -1,4 +1,4 @@
-import { DISTRO_MIRRORS, RADXA_MIRRORS, type ExtraAptRepo } from '@rsdk-webui/shared'
+import { DISTRO_MIRRORS, RADXA_MIRRORS, RADXA_MIRROR_HOSTS, type ExtraAptRepo } from '@rsdk-webui/shared'
 import { Button, Card, Field, Note, Select, TextInput, Toggle } from '../ui.tsx'
 import type { StepProps } from './types.ts'
 
@@ -26,6 +26,21 @@ export function ReposStep({ profile, patch }: StepProps) {
 
   const radxaIsThirdParty = repos.radxaMirror !== ''
 
+  // 列表里已经滤掉了没有 radxa-deb 的站点，但用户可能从旧方案（或手改的
+  // profile.json）里带进一个失效地址。另外 <select> 遇到不在选项里的值时会显示
+  // 第一项，看起来像"官方源"，实际却在拿坏地址构建 —— 所以补一项把它显出来。
+  const radxaHost = (() => {
+    try {
+      return new URL(repos.radxaMirror).host
+    } catch {
+      return ''
+    }
+  })()
+  const radxaMirrorUnverified = repos.radxaMirror !== '' && !RADXA_MIRROR_HOSTS.includes(radxaHost)
+  const radxaOptions = radxaMirrorUnverified
+    ? [...RADXA_MIRRORS, { label: `未验证：${repos.radxaMirror}`, value: repos.radxaMirror }]
+    : RADXA_MIRRORS
+
   return (
     <div className="grid-2">
       <Card title="Radxa 软件源 (radxa-deb)">
@@ -37,7 +52,7 @@ export function ReposStep({ profile, patch }: StepProps) {
             <Select
               value={repos.radxaMirror}
               onChange={(v) => setRepos({ radxaMirror: v, ...(v ? { usePkgsJson: false } : {}) })}
-              options={RADXA_MIRRORS}
+              options={radxaOptions}
             />
           </Field>
           <Toggle
@@ -47,6 +62,15 @@ export function ReposStep({ profile, patch }: StepProps) {
             title="嵌入 pkgs.json 元数据"
             desc="带上包版本清单，后装软件好对齐版本。第三方镜像通常没有"
           />
+          {radxaMirrorUnverified && (
+            <div style={{ marginTop: 10 }}>
+              <Note tone="warn">
+                这个站没验证过。要是它没同步 radxa-deb，构建会在 apt-get update 阶段失败。
+                实测可用：
+                <span className="mono"> {RADXA_MIRROR_HOSTS.join(' / ')}</span>
+              </Note>
+            </div>
+          )}
           <div style={{ height: 10 }} />
           <Toggle
             checked={repos.testRepo}

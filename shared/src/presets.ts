@@ -92,15 +92,30 @@ export const LOCALES = [
 
 export const KEYBOARD_LAYOUTS = ['us', 'cn', 'gb', 'de', 'fr', 'ru', 'jp', 'kr', 'es', 'it']
 
+/**
+ * radxa-deb 镜像。**只放实测同步了这个仓库的站点**：
+ * rsdk 会拼成 `deb <mirror>/<suite> <suite> main`，站点没有这个仓库时
+ * apt-get update 直接失败，构建在装包阶段就崩。
+ *
+ * 2026-09-28 实测（<mirror>/bookworm/dists/bookworm/Release 与 rk3588-bookworm 均 200）：
+ *   aghost.cn / lzu.edu.cn / hust.edu.cn / mirror.nju.edu.cn
+ * 当时 **USTC 与清华 TUNA 都没有 radxa-deb**（/radxa-deb/ 与 /radxa/ 都是 404），
+ * 注意这两个站确实有 Debian 镜像，但那是 DISTRO_MIRRORS 那一栏，别混。
+ *
+ * 复核：./ops/check-mirrors.py
+ */
 export const RADXA_MIRRORS = [
   { label: '官方 radxa-deb (GitHub Pages)', value: '' },
-  { label: 'mirrors.ustc.edu.cn (radxa-deb)', value: 'https://mirrors.ustc.edu.cn/radxa-deb' },
-  { label: 'mirrors.tuna.tsinghua.edu.cn (radxa-deb)', value: 'https://mirrors.tuna.tsinghua.edu.cn/radxa-deb' },
   { label: 'mirrors.aghost.cn (radxa-deb)', value: 'https://mirrors.aghost.cn/radxa-deb' },
   { label: 'mirrors.lzu.edu.cn (radxa-deb)', value: 'https://mirrors.lzu.edu.cn/radxa-deb' },
   { label: 'mirrors.hust.edu.cn (radxa-deb)', value: 'https://mirrors.hust.edu.cn/radxa-deb' },
   { label: 'mirror.nju.edu.cn (radxa-deb)', value: 'https://mirror.nju.edu.cn/radxa-deb' },
 ]
+
+/** 上面这些站点里实测可用的主机名 —— UI 拿它判断用户手填/旧方案里的地址。 */
+export const RADXA_MIRROR_HOSTS = RADXA_MIRRORS.map((m) => m.value)
+  .filter(Boolean)
+  .map((v) => new URL(v).host)
 
 export const DISTRO_MIRRORS = [
   { label: '上游默认 (deb.debian.org / ports.ubuntu.com)', value: '' },
