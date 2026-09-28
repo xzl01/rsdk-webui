@@ -11,6 +11,7 @@ import { runFetchImage } from './fetch-harness.ts'
 import { assembleBundle, isIgnoredBundlePath } from './assemble.ts'
 import {
   GENERATOR_VERSION,
+  nmKeyfileValue,
   patchRootfsJsonnet,
   rootfsCacheKey,
   renderBundle,
@@ -461,6 +462,22 @@ const FULL_PROFILE = makeProfile({
   hooks: { pre: [{ id: 'h1', name: 'my hook', script: 'echo hi\n', enabled: true, inRootfs: false }] },
 })
 
+test('nmKeyfileValue 挡住 keyfile 注入', () => {
+  // 换行/分号/井号如果裸着写进去，就能伪造出新的键甚至新的 section
+  assert.equal(nmKeyfileValue('plain'), '"plain"')
+  assert.equal(nmKeyfileValue('has space'), '"has space"')
+  assert.equal(nmKeyfileValue('inject\npsk=evil'), '"inject\\npsk=evil"')
+  assert.equal(nmKeyfileValue('a"b'), '"a\\"b"')
+  assert.equal(nmKeyfileValue('back\\slash'), '"back\\\\slash"')
+  assert.equal(nmKeyfileValue('tab\there'), '"tab\\there"')
+  // 裸 \r 直接删掉（不是转义），所以 CRLF 会收敛成一个转义后的 \n
+  assert.equal(nmKeyfileValue('cr\rlf'), '"crlf"')
+  assert.equal(nmKeyfileValue('a\r\nb'), '"a\\nb"')
+  // 引号内的值整体只占一行，不会多出键
+  const escaped = nmKeyfileValue('# not a comment\n[new-section]')
+  assert.ok(!escaped.includes('\n'), 'escaped value must stay on one line')
+})
+
 test('the generated install hook runs to completion against a fake rootfs', () => {
   const run = runInstallScript(FULL_PROFILE)
   try {
@@ -499,10 +516,11 @@ test('the generated install hook runs to completion against a fake rootfs', () =
     assert.equal(read(run.rootfs, 'root/.ssh/authorized_keys'), 'ssh-rsa BBBB root@host\n')
     assert.match(read(run.rootfs, 'etc/ssh/sshd_config.d/90-rsdk-webui.conf'), /PasswordAuthentication no/)
     assert.equal(mode(run.rootfs, 'etc/NetworkManager/system-connections/nm-my-wifi.nmconnection'), 0o600)
-    assert.match(
-      read(run.rootfs, 'etc/NetworkManager/system-connections/nm-my-wifi.nmconnection'),
-      /psk=p@ss word/,
-    )
+    // v3 起 NM keyfile 的值一律带引号（含空格/`#`/引号也不会破坏解析）
+    const nm = read(run.rootfs, 'etc/NetworkManager/system-connections/nm-my-wifi.nmconnection')
+    assert.match(nm, /^id="My WiFi"$/m)
+    assert.match(nm, /^ssid="My WiFi"$/m)
+    assert.match(nm, /^psk="p@ss word"$/m)
     assert.ok(
       isSymlinkTo(
         run.rootfs,
