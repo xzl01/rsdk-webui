@@ -303,17 +303,19 @@ export default function App() {
         {route.kind === 'wizard' ? (
           <>
             <h4>定制流程</h4>
-            {STEPS.map((s, i) => (
-              <button
-                key={s.id}
-                className={`step${s.id === step ? ' active' : ''}`}
-                aria-current={s.id === step ? 'step' : undefined}
-                onClick={() => setStep(s.id)}
-              >
-                <span className="num">{i + 1}</span>
-                <span className="label">{s.label}</span>
-              </button>
-            ))}
+            <div className="rail-steps">
+              {STEPS.map((s, i) => (
+                <button
+                  key={s.id}
+                  className={`step${s.id === step ? ' active' : ''}`}
+                  aria-current={s.id === step ? 'step' : undefined}
+                  onClick={() => setStep(s.id)}
+                >
+                  <span className="num">{i + 1}</span>
+                  <span className="label">{s.label}</span>
+                </button>
+              ))}
+            </div>
             <h4 style={{ marginTop: 18 }}>已保存方案</h4>
             <div className="rail-profile-actions">
               <Button
@@ -410,6 +412,9 @@ export default function App() {
             <div>
               <div className="page-head">
                 <div>
+                  <span className="step-meta">
+                    第 {String(stepIndex + 1).padStart(2, '0')} 步 / 共 {STEPS.length} 步
+                  </span>
                   <h1>{STEPS[stepIndex]?.label}</h1>
                   <p>
                     {step === 'target' && '选择目标板子与系统版本，后续可选值会自动跟随该板子的 BSP 支持范围。'}

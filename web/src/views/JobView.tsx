@@ -58,6 +58,10 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
 
     const connect = () => {
       source = new EventSource(`/api/jobs/${jobId}/stream?offset=${offsetRef.current}`)
+      // 连上一次就清零：长构建期间服务重启/网络抖动几次不该耗尽重连机会
+      source.onopen = () => {
+        attempts = 0
+      }
       source.addEventListener('log', (event) => {
         const data = JSON.parse((event as MessageEvent).data) as { text: string; offset: number }
         offsetRef.current = data.offset
@@ -73,11 +77,11 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
         source?.close()
         void api.job(jobId).then(setJob).catch(() => undefined)
       })
-      // a bounded number of reconnects: the job may have been pruned, in which
-      // case the SSE endpoint answers 404 forever
+      // a bounded number of *consecutive* reconnects: the job may have been
+      // pruned, in which case the SSE endpoint answers 404 forever
       source.onerror = () => {
         source?.close()
-        if (!stopped && attempts++ < 5) setTimeout(connect, 2000)
+        if (!stopped && attempts++ < 30) setTimeout(connect, 2000)
       }
     }
 
@@ -128,7 +132,7 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
             <div style={{ flex: 1 }} />
             <label className="toggle" style={{ padding: '3px 9px', width: 'auto' }}>
               <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
-              <span className="box">{autoScroll ? '✓' : ''}</span>
+              <span className="box" style={{ marginTop: 0 }} aria-hidden="true" />
               <span className="text">
                 <strong>自动滚动</strong>
               </span>
@@ -168,7 +172,7 @@ export function JobView({ jobId, onBack }: { jobId: string; onBack: () => void }
       </Card>
 
       <div className="job-sidebar">
-        {job && (job.steps.length > 0 || running) && <Card title="进度" className="job-progress">
+        {job && (job.steps.length > 0 || running) && <Card title="进度" className={`job-progress${running ? ' running' : ''}`}>
           <div className="body">
             {job && job.steps.length > 0 ? (
               <div className="timeline">

@@ -67,25 +67,9 @@ export function PreviewPanel({ profile, onClose }: { profile: Profile; onClose: 
   }
 
   return (
-    <aside
-      style={{
-        borderLeft: '1px solid var(--line-soft)',
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 0,
-        background: 'rgba(10,12,15,0.6)',
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 12px',
-          borderBottom: '1px solid var(--line-soft)',
-        }}
-      >
-        <strong style={{ fontSize: 13 }}>生成物预览</strong>
+    <aside className="preview-panel">
+      <header>
+        <strong>生成物预览</strong>
         {busy && <span className="spin" />}
         <div style={{ flex: 1 }} />
         <Button size="sm" variant="ghost" onClick={download}>
@@ -102,11 +86,11 @@ export function PreviewPanel({ profile, onClose }: { profile: Profile; onClose: 
           </button>
         ))}
       </div>
-      {error && <p style={{ padding: '0 12px', color: 'var(--danger)', fontSize: 12 }}>{error}</p>}
-      <pre className="code wrap" style={{ flex: 1, maxHeight: 'none', border: 'none', borderRadius: 0, margin: 0 }}>
+      {error && <p style={{ padding: '0 14px', color: 'var(--danger)', fontSize: 12.5 }}>{error}</p>}
+      <pre className="code wrap">
         {content}
       </pre>
-      <footer style={{ padding: '8px 12px', borderTop: '1px solid var(--line-soft)', fontSize: 11.5 }} className="faint">
+      <footer>
         这些文件就是提交构建时写进 bundle 的内容，与服务端生成的完全一致。
       </footer>
     </aside>

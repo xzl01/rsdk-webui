@@ -126,7 +126,7 @@ export function Toggle({
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
-      <span className="box">{checked ? '✓' : ''}</span>
+      <span className="box" aria-hidden="true" />
       <span className="text">
         <strong>{title}</strong>
         {desc && <span>{desc}</span>}
