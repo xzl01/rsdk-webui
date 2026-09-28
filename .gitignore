@@ -32,3 +32,6 @@ docs/FLOW.md
 
 # 本地上游 issue 草稿（不随仓库发布）
 docs/upstream-issues/
+
+# WorkBuddy 会话数据（评审记录、工作日志）——留在磁盘上，不进仓库
+.workbuddy/
