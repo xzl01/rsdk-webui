@@ -140,7 +140,13 @@ export function PackagesStep({ profile, patch, catalog }: StepProps) {
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0,1fr)' }}>
         <Card
           title="附加软件包"
-          hint={meta ? `索引 ${meta.count} 个包` : '尚未建立索引'}
+          hint={
+            meta
+              ? meta.count > 0
+                ? `索引 ${meta.count} 个包`
+                : '索引已部署（静态模式不预载数量）'
+              : '尚未建立索引'
+          }
           actions={
             !api.buildIndex ? (
               <Chip tone={meta ? 'accent' : 'warn'}>{meta ? '静态索引' : '索引未部署'}</Chip>

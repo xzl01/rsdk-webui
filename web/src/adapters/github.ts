@@ -149,13 +149,24 @@ async function loadIndex(suite: string) {
   return entry
 }
 
+/**
+ * 静态站点只为「索引是否存在」发一次 HEAD（6.4MB 的索引不该在进页面时就下完），
+ * 因此数量是未知的。用一个具名哨兵而不是 0，好让调用方区分
+ * 「没部署索引」和「部署了但数量未知」—— 早先这个 -1 直接印到了界面上
+ * （「索引 -1 个包」）。
+ */
+export const STATIC_INDEX_COUNT_UNKNOWN = -1
+
 export const staticPackages = {
   /** the whole index for a suite, or null when the site did not ship one */
   load: loadIndex,
 
   async indexStatus(suite: string) {
     const body = await fetch(asset(`pkgindex/${suite}.json.gz`), { method: 'HEAD' })
-    return { key: suite, meta: body.ok ? { count: -1, builtAt: 0 } : null }
+    return {
+      key: suite,
+      meta: body.ok ? { count: STATIC_INDEX_COUNT_UNKNOWN, builtAt: 0 } : null,
+    }
   },
 
   async search(suite: string, query: string, limit = 60): Promise<{ meta: { count: number } | null; hits: PackageSearchHit[] }> {
