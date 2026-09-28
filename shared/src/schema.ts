@@ -78,6 +78,12 @@ export const ReposSchema = z.object({
   distroMirror: pattern(/^https?:\/\/\S+$/, '镜像地址应为 http(s) URL'),
   /** build against the -test radxa repo */
   testRepo: z.boolean().default(false),
+  /**
+   * 镜像站探不通时回退到官方源（radxa-repo.github.io / deb.debian.org）。
+   * 默认开：镜像站会抽风，也可能根本没同步 radxa-deb，而 apt-get update 拿到
+   * 404 会直接终止整次构建 —— 回退比让半小时的构建白跑划算。
+   */
+  mirrorFallback: z.boolean().default(true),
   /** embed Radxa pkgs.json metadata */
   usePkgsJson: z.boolean().default(true),
   /** snapshot.debian.org timestamp, e.g. 20240101T000000Z */

@@ -602,6 +602,100 @@ export function renderAptRepoFiles(p: Profile): BundleFile[] {
 // container-side script
 // ---------------------------------------------------------------------------
 
+/**
+ * 镜像站探不通就回退到官方源。
+ *
+ * 为什么必须在这里做：rsdk 把镜像拼成 `deb <mirror>/<suite> <suite> main`，
+ * 站点没有这个仓库（或只是临时抽风）时 apt-get update 会返回非零，bdebstrap
+ * 直接终止整次构建 —— 实测 USTC / 清华 TUNA 都没有 radxa-deb，选了就白跑。
+ * 探测必须在容器里、在 rsdk 之前：本机和 GitHub Actions 都走 inner.sh，
+ * 所以两边行为一致；而且只有容器内才知道网络到底通不通。
+ *
+ * 只认 HTTP 200：TCP 能连上但仓库是 404 的情况必须算失败。
+ * 注意 soc 仓库（<soc>-<suite>）与家族仓库同站同源，实测几家镜像是一致同步的，
+ * 所以探家族仓库即可。
+ */
+function mirrorProbeBlock(p: Profile): string {
+  // 只有显式 false 才关：静态模式读 localStorage 里的旧方案不做 zod 校验，
+  // 那些 profile 没有这个字段，用 !x 会让回退被静默关掉
+  if (p.repos.mirrorFallback === false) return ''
+  const { radxaMirror, distroMirror, testRepo, snapshot } = p.repos
+  if (!radxaMirror && !distroMirror) return ''
+
+  const checks: string[] = []
+  if (radxaMirror) {
+    const suites = testRepo ? [p.target.suite, `${p.target.suite}-test`] : [p.target.suite]
+    const urls = suites.map((name) => `${radxaMirror.replace(/\/$/, '')}/${name}/dists/${name}/Release`)
+    checks.push(probeSnippet('-M', urls, 'radxa-deb', radxaMirror, 'radxa-repo.github.io'))
+  }
+  // 快照构建时不带 -m，别去探一个没在用的地址
+  if (distroMirror && !snapshot) {
+    const base = distroMirror.replace(/\/$/, '')
+    checks.push(
+      probeSnippet(
+        '-m',
+        [`${base}/debian/dists/${p.target.suite}/Release`],
+        '发行版源',
+        distroMirror,
+        'deb.debian.org',
+      ),
+    )
+  }
+  if (checks.length === 0) return ''
+
+  return `
+# ---------------------------------------------------------------------------
+# 镜像站可用性探测：不通就把对应参数摘掉，回退到官方源，而不是让构建死掉。
+# 探到 404 也算不通 —— 仓库不存在时 apt-get update 同样会终止构建。
+# ---------------------------------------------------------------------------
+url_http_code() {
+  curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$1" 2>/dev/null || echo 000
+}
+
+drop_arg() {
+  local want="$1" out=() skip=0 arg
+  for arg in "\${ARGS[@]}"; do
+    if [[ "$skip" == 1 ]]; then skip=0; continue; fi
+    if [[ "$arg" == "$want" ]]; then skip=1; continue; fi
+    out+=("$arg")
+  done
+  ARGS=("\${out[@]}")
+}
+${checks.join('')}`
+}
+
+/** 单个源：逐个 URL 探，任一不通就摘掉参数并用官方源 */
+function probeSnippet(
+  flag: string,
+  urls: string[],
+  what: string,
+  mirror: string,
+  official: string,
+): string {
+  const probes = urls
+    .map(
+      (url) => `if [[ "$(url_http_code ${shq(url)})" != "200" ]]; then
+  reachable=0
+  failed_url=${shq(url)}
+fi`,
+    )
+    .join('\n')
+  return `
+# ${what}: ${mirror}
+reachable=1
+failed_url=''
+${probes}
+if [[ "$reachable" == 1 ]]; then
+  echo "${what} : 镜像可用 (${mirror})"
+else
+  echo "!! ${what} 镜像探不通，回退到官方源 ${official}" >&2
+  echo "!!   探测地址: \$failed_url" >&2
+  echo "!!   构建日志里会显示实际使用的源；要禁用回退请在「软件源」里关掉" >&2
+  drop_arg ${shq(flag)}
+fi
+`
+}
+
 export function renderInnerScript(p: Profile): string {
   const args = renderRsdkArgs(p)
   const cacheKey = rootfsCacheKey(p)
@@ -655,6 +749,7 @@ setup_binfmt
 echo
 
 ARGS=(${args.map(shq).join(' ')})
+${mirrorProbeBlock(p)}
 
 # Reuse the previous build's rootfs.tar only when nothing that lands in the
 # rootfs changed. This file lives in the working directory, which the caller

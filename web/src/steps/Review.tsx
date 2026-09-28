@@ -241,6 +241,10 @@ export function ReviewStep({ profile, patch, env: baseEnv, goto, mode, verdicts 
                 {profile.repos.testRepo ? 'test' : 'stable'}
                 {profile.repos.radxaMirror ? ' · 第三方镜像' : ''}
                 {profile.repos.snapshot ? ` · snapshot ${profile.repos.snapshot}` : ''}
+                {(profile.repos.radxaMirror || profile.repos.distroMirror) &&
+                profile.repos.mirrorFallback !== false
+                  ? ' · 探不通回退官方源'
+                  : ''}
               </dd>
               <dt>额外软件包</dt>
               <dd>{profile.packages.install.length} 个</dd>

@@ -62,6 +62,14 @@ export function ReposStep({ profile, patch }: StepProps) {
             title="嵌入 pkgs.json 元数据"
             desc="带上包版本清单，后装软件好对齐版本。第三方镜像通常没有"
           />
+          {(repos.radxaMirror !== '' || repos.distroMirror !== '') && (
+            <Toggle
+              checked={repos.mirrorFallback !== false}
+              onChange={(v) => setRepos({ mirrorFallback: v })}
+              title="镜像不通时回退官方源"
+              desc="构建前先探一次 Release 文件，探不到就用官方源，避免白跑"
+            />
+          )}
           {radxaMirrorUnverified && (
             <div style={{ marginTop: 10 }}>
               <Note tone="warn">

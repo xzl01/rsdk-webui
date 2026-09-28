@@ -16,6 +16,7 @@ import {
   rootfsCacheKey,
   renderBundle,
   renderGhWorkflow,
+  renderInnerScript,
   renderInstallScript,
   renderTemplateReadme,
   renderRsdkArgs,
@@ -476,6 +477,68 @@ test('nmKeyfileValue escapes GKeyFile strings without changing literal quotes or
   assert.equal(nmKeyfileValue('cr\rlf'), 'cr\\rlf')
   assert.equal(nmKeyfileValue('a\r\nb'), 'a\\r\\nb')
   assert.ok(!nmKeyfileValue('# not a comment\n[new-section]').includes('\n'))
+})
+
+test('镜像探不通时 inner.sh 会把 -M 摘掉回退到官方源', () => {
+  const withMirror = makeProfile({
+    repos: { radxaMirror: 'https://mirrors.example.test/radxa-deb', mirrorFallback: true },
+  })
+  const script = renderInnerScript(withMirror)
+  assert.match(script, /镜像站可用性探测/)
+  assert.ok(script.includes('https://mirrors.example.test/radxa-deb'), '要探的就是配的那个镜像')
+  assert.match(script, /drop_arg -M/, '探不通要摘掉 -M')
+
+  // 一致性：ARGS 里确实带着 -M，摘掉后才等于"不传镜像"
+  assert.ok(renderRsdkArgs(withMirror).includes('-M'))
+
+  // 关掉回退 -> 不生成探测块，参数原样保留
+  const off = makeProfile({
+    repos: { radxaMirror: 'https://mirrors.example.test/radxa-deb', mirrorFallback: false },
+  })
+  assert.ok(!renderInnerScript(off).includes('镜像站可用性探测'))
+
+  // 没配镜像 -> 没有可回退的东西，不生成探测块
+  assert.ok(!renderInnerScript(makeProfile()).includes('镜像站可用性探测'))
+})
+
+test('drop_arg 只摘掉配对的 -M，不动别的参数', () => {
+  // 直接跑生成出来的那段 shell：curl 用桩函数喂 HTTP 状态，
+  // 这样不用容器、不用网络也能验证参数手术是否正确
+  const script = renderInnerScript(
+    makeProfile({ repos: { radxaMirror: 'https://mirrors.example.test/radxa-deb', distroMirror: 'https://mirrors.example.test' } }),
+  )
+  const start = script.indexOf('url_http_code()')
+  const end = script.indexOf('# Reuse the previous')
+  const probe = script.slice(start, end)
+
+  const harness = `
+set -euo pipefail
+curl() { echo "\${STUB_CODE:-404}"; }        # 桩：不联网，直接给状态码
+ARGS=(build -M https://mirror/radxa-deb -m https://mirror --test-repo)
+{ ${probe} } > /dev/null                     # 探测自己的输出不要混进来比参数
+printf '%s\n' "\${ARGS[@]}"
+`
+  const run = (code: string) =>
+    execFileSync('bash', ['-c', harness], { env: { ...process.env, STUB_CODE: code } })
+      .toString()
+      .trim()
+      .split('\n')
+
+  // 404 -> 两个源各判一次，-M 与 -m 连同它们的值一起被摘掉，其余参数顺序不变
+  assert.deepEqual(run('404'), ['build', '--test-repo'])
+  // 200 -> 一个都不摘，参数完全不动
+  assert.deepEqual(run('200'), ['build', '-M', 'https://mirror/radxa-deb', '-m', 'https://mirror', '--test-repo'])
+})
+
+test('快照构建只从 snapshot.debian.org 取包，不再探发行版镜像', () => {
+  const script = renderInnerScript(
+    makeProfile({ repos: { distroMirror: 'https://mirrors.example.test', snapshot: '20240101T000000Z' } }),
+  )
+  assert.match(script, /--snapshot/)
+  // 镜像地址本身仍会作为 -m 出现在参数里（rsdk 自己会拒绝这种组合），
+  // 这里要断言的是"探测块里没有它" —— 没必要去探一个用不上的源
+  const probe = script.slice(script.indexOf('镜像站可用性探测'), script.indexOf('# Reuse the previous'))
+  assert.ok(!probe.includes('mirrors.example.test'), '带快照时不该探发行版镜像')
 })
 
 test('the generated install hook runs to completion against a fake rootfs', () => {
