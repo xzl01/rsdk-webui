@@ -72,21 +72,25 @@ def parse(text: str, is_radxa: bool, is_test: bool, out: dict[str, dict]) -> int
         if not block.strip():
             continue
         name = version = arch = section = desc = ""
+        field = ""
         for line in block.split("\n"):
-            if line.startswith(" ") and desc:
+            # 续行（以空格/Tab 开头）属于**上一个字段**，而不是「我们记住的那个字段」。
+            # Tag: 也是多行字段，之前一律往 desc 上追加，结果一堆 debtags
+            # （uitoolkit::sdl, …）被粘进了包描述里。
+            if line[:1] in (" ", "\t") and field == "Description":
                 desc += " " + line.strip()
                 continue
-            key, _, value = line.partition(":")
+            field, _, value = line.partition(":")
             value = value.strip()
-            if key == "Package":
+            if field == "Package":
                 name = value
-            elif key == "Version":
+            elif field == "Version":
                 version = value
-            elif key == "Architecture":
+            elif field == "Architecture":
                 arch = value
-            elif key == "Section":
+            elif field == "Section":
                 section = value
-            elif key == "Description":
+            elif field == "Description":
                 desc = value
         if not name or arch not in ("arm64", "all"):
             continue
