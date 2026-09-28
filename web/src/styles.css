@@ -1057,6 +1057,24 @@ pre.code.log {
   margin: 6px 0 0;
 }
 
+/* 常见问题：一行一问，点开看答案（原来是 190px 定宽的问题列 + 答案列） */
+.faq details {
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+.faq details:last-child {
+  border-bottom: 0;
+}
+.faq details > summary {
+  color: var(--text);
+}
+.faq details > p {
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
 /* ---------------------------------------------------------------- 任务视图 */
 
 .job-view {
@@ -1337,7 +1355,9 @@ pre.code.log {
 .kv dt {
   padding: 4px 14px 4px 0;
   color: var(--text-faint);
-  white-space: nowrap;
+  /* 不能 nowrap：定宽列（FAQ 190px、后端对比 92px）里的长标签会溢出到 dd 上，
+     看起来就是文字叠在一起（FAQ 第一问要 234px，格子只有 190px）。 */
+  overflow-wrap: anywhere;
 }
 .kv dd {
   margin: 0;

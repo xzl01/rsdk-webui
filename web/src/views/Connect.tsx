@@ -207,40 +207,46 @@ cd ${UPSTREAM.split('/')[1]} && ./ops/setup.sh && pnpm install && pnpm start`}</
         </Card>
 
         <Card title="常见问题">
-          <div className="body">
-            <dl className="kv" style={{ gridTemplateColumns: '190px minmax(0,1fr)' }}>
-              <dt>为什么不能用 GitHub 账号授权直接登录？</dt>
-              <dd>
+          <div className="body faq">
+            <details>
+              <summary>为什么不能用 GitHub 账号授权直接登录？</summary>
+              <p>
                 GitHub 的 OAuth 端点在 <span className="mono">github.com</span> 上，而它
                 <b>不返回 CORS 头</b>（只有 <span className="mono">api.github.com</span> 返回），
                 所以纯静态页面无法完成换 token 的请求 —— 这条只能靠一个后端中转。本地模式是有的。
-              </dd>
-              <dt>Pushed branch 是什么？</dt>
-              <dd>
+              </p>
+            </details>
+            <details>
+              <summary>Pushed branch 是什么？</summary>
+              <p>
                 每次构建会推一个 <span className="mono">build/&lt;profile-id&gt;</span> 分支，
                 里面是完整的构建描述（profile.json / run.sh / customize/ / rsdk-build/）。
                 因为仓库是公开的，<b>不要在里面放 Wi-Fi 密码或密码哈希</b>。
-              </dd>
-              <dt>Actions 分钟数够吗？</dt>
-              <dd>
+              </p>
+            </details>
+            <details>
+              <summary>Actions 分钟数够吗？</summary>
+              <p>
                 公开仓库不限量。私有仓库每月免费 2000 分钟，而一次 arm64 构建约 60–90 分钟 —— 大约一天一次。
                 <a href="https://github.com/settings/billing" target="_blank" rel="noreferrer">
-                  {' '}
-                  查看用量 ↗
+                {' '}
+                查看用量 ↗
                 </a>
-              </dd>
-              <dt>Pages 需要手动开吗？</dt>
-              <dd>
+              </p>
+            </details>
+            <details>
+              <summary>Pages 需要手动开吗？</summary>
+              <p>
                 如果用「Use this template」，<span className="mono">pages.yml</span> 会自动跑；
                 但创建 Pages 站点需要仓库管理员权限，Actions 的 token 没有 ——
                 报错里会给出去
                 <a href={`https://github.com/${UPSTREAM}/settings/pages`} target="_blank" rel="noreferrer">
-                  {' '}
-                  Settings → Pages{' '}
+                {' '}
+                Settings → Pages{' '}
                 </a>
                 打开一次。
-              </dd>
-            </dl>
+              </p>
+            </details>
           </div>
         </Card>
       </div>
