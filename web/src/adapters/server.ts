@@ -6,7 +6,16 @@ import type { Catalog, EnvStatus, PackageSearchHit, PreflightResult, Profile } f
 import type { Backend, Job, RepoSetupResult, RepoStatus, RenderResult } from './types.ts'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
+  // 请求头固定是 application/json,而 Fastify 会拒绝它的空 body
+  // (FST_ERR_CTP_EMPTY_JSON_BODY)。id 已经在路径里的写请求(cancel、download-gh、
+  // fetch-image、refresh、delete)没有参数,也要提交 {},否则一律 400。
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const emptyBody = init?.body === undefined && method !== 'GET' && method !== 'HEAD'
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+    ...(emptyBody ? { body: '{}' } : {}),
+  })
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
     try {
