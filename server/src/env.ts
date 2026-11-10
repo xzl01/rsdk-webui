@@ -16,8 +16,17 @@ export type Engine = {
 const engines = new Map<string, Engine | null>()
 const detecting = new Map<string, Promise<Engine | null>>()
 
-async function probePodman(bin: string, args: string[]): Promise<boolean> {
-  const r = await tryRun(bin, [...args, 'info', '--format', '{{.Host.Security.Rootless}}'], { timeoutMs: 30_000 })
+/**
+ * 引擎连通性探测（守护进程可用 = 可用）。
+ *
+ * `{{.Host.Security.Rootless}}` 是 podman 独有的 info 模板；docker 的同名模板里
+ * 没有 `.Host` 字段，套用过来会渲染失败退出 1，把本来正常的 docker 判成不可用。
+ */
+async function probeEngine(kind: 'podman' | 'docker', bin: string, args: string[]): Promise<boolean> {
+  const probe = kind === 'podman'
+    ? ['info', '--format', '{{.Host.Security.Rootless}}']
+    : ['info']
+  const r = await tryRun(bin, [...args, ...probe], { timeoutMs: 30_000 })
   return r.code === 0
 }
 
@@ -56,7 +65,7 @@ async function detect(requested?: 'podman' | 'docker'): Promise<Engine | null> {
 
     if (kind === 'podman' && config.podmanRoot !== 'standard') {
       // 1) does the user's normal store work?
-      ok = await probePodman(bin, [])
+      ok = await probeEngine('podman', bin, [])
       if (!ok) {
         // 2) dedicated store, native driver for the backing filesystem
         const backing = await fsType(config.dataDir)
@@ -66,17 +75,17 @@ async function detect(requested?: 'podman' | 'docker'): Promise<Engine | null> {
           '--runroot', config.podmanRunRoot,
           '--storage-driver', driver,
         ]
-        if (await probePodman(bin, candidate)) {
+        if (await probeEngine('podman', bin, candidate)) {
           args = candidate
           ok = true
-        } else if (await probePodman(bin, ['--root', config.podmanRoot, '--runroot', config.podmanRunRoot, '--storage-driver', 'vfs'])) {
+        } else if (await probeEngine('podman', bin, ['--root', config.podmanRoot, '--runroot', config.podmanRunRoot, '--storage-driver', 'vfs'])) {
           // last resort: slow but works everywhere
           args = ['--root', config.podmanRoot, '--runroot', config.podmanRunRoot, '--storage-driver', 'vfs']
           ok = true
         }
       }
     } else {
-      ok = await probePodman(bin, [])
+      ok = await probeEngine(kind, bin, [])
     }
 
     if (!ok) continue
